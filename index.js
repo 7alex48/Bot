@@ -259,7 +259,7 @@ if (command === 'rate') {
 
   const percent = Math.floor(Math.random() * 101);
 
-  let verdict = "sprosty kokot;
+  let verdict = "sprosty kokot";
   if (percent > 80) verdict = 'no da sa';
   else if (percent > 60) verdict = 'mas v tej hlave nieco';
   else if (percent > 40) verdict = 'uz v tej hlave skoro nemas nic';
