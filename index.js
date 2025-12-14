@@ -1,10 +1,11 @@
-console.log('TOKEN:', !!process.env.DISCORD_TOKEN);
+Console.log('TOKEN:', !!process.env.DISCORD_TOKEN);
 const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,   SlashCommandBuilder,
   PermissionFlagsBits} = require('discord.js');
 
 const ADMIN_ROLE_ID = '1448769935642853376';
+const OWNER_ID = '1254537544322912256'; // VÁŠ ID: Len tento užívateľ môže použiť /say
 const PREFIX = '!';
 const COLOR = 0x5865F2; // Discord blurple
 
@@ -15,15 +16,6 @@ const client = new Client({
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.DirectMessages
   ]
-});
-
-client.once('ready', () => {
-  console.log(`✅ Prihlásený ako ${client.user.tag}`);
-
-  client.user.setPresence({
-    activities: [{ name: 'bestpro', type: 4 }],
-    status: 'online'
-  });
 });
 
 // ========== HELP EMBED ==========
@@ -53,7 +45,7 @@ const helpEmbed = () =>
 `
     );
 
-// ========== MAIN ==========
+// ========== MAIN CHAT COMMANDS (!-commands) ==========
 client.on('messageCreate', async message => {
   if (message.author.bot) return;
   if (!message.content.startsWith(PREFIX)) return;
@@ -213,7 +205,7 @@ client.on('messageCreate', async message => {
       .then(m => setTimeout(() => m.delete(), 3000));
   }
 
-  // ===== SAY =====
+  // ===== SAY (for chat commands) =====
   if (command === 'say') {
     const text = args.join(' ');
     if (!text)
@@ -462,13 +454,31 @@ if (command === 'avatar') {
 
   
 });
+
+// ========== SLASH COMMANDS (/say) ==========
 client.on('interactionCreate', async interaction => {
   if (!interaction.isChatInputCommand()) return;
 
   if (interaction.commandName === 'say') {
+    // KONTROLA ID: Len OWNER_ID môže použiť tento príkaz
+    if (interaction.user.id !== OWNER_ID) {
+      return interaction.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(0xED4245)
+            .setDescription('❌ Nemáš oprávnenie použiť tento príkaz. Len majiteľ bota ho môže použiť.')
+        ],
+        ephemeral: true // Len vy uvidíte túto chybovú správu
+      });
+    }
+
     const text = interaction.options.getString('text');
 
-    await interaction.channel.send(text);
+    await interaction.channel.send({
+      embeds: [
+        new EmbedBuilder().setColor(COLOR).setDescription(text)
+      ]
+    });
 
     return interaction.reply({
       embeds: [
@@ -481,14 +491,17 @@ client.on('interactionCreate', async interaction => {
   }
 });
 
+// ========== READY EVENT (Consolidated) ==========
 client.once('ready', async () => {
   console.log(`✅ Prihlásený ako ${client.user.tag}`);
 
+  // Set presence
   client.user.setPresence({
     activities: [{ name: 'bestpro', type: 4 }],
     status: 'online'
   });
 
+  // Deploy Slash Commands
   const data = [
     new SlashCommandBuilder()
       .setName('say')
@@ -499,10 +512,12 @@ client.once('ready', async () => {
           .setDescription('Text, ktorý má bot poslať')
           .setRequired(true)
       )
-      .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
+      // Odstránili sme setDefaultMemberPermissions, kontrola je teraz v interactionCreate
   ];
 
   await client.application.commands.set(data);
+  console.log('✅ Slash Commands boli nasadené.');
 });
 
 client.login(process.env.DISCORD_TOKEN);
+
