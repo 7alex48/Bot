@@ -452,6 +452,34 @@ if (command === 'avatar') {
   });
 }
 
+// ===== KURACIE STEHNÁ =====
+if (command === 'kuraciestehna') {
+  return message.channel.send({
+    embeds: [
+      new EmbedBuilder()
+        .setTitle('🍗 Kuracie stehná – jednoduchý recept')
+        .setColor(COLOR)
+        .setDescription(
+          `**📝 Ingrediencie:**\n` +
+          `• Kuracie stehná\n` +
+          `• Soľ, čierne korenie\n` +
+          `• Sladká paprika\n` +
+          `• Cesnak (2–3 strúčiky)\n` +
+          `• Olej alebo maslo\n\n` +
+          `**👨‍🍳 Postup:**\n` +
+          `1️⃣ Stehná umy a osuši\n` +
+          `2️⃣ Osoľ, okoreň, posyp paprikou a potri cesnakom\n` +
+          `3️⃣ Polej olejom / pridaj maslo\n` +
+          `4️⃣ Peč na **200 °C cca 45–50 minút**\n` +
+          `5️⃣ Počas pečenia občas podlej výpekom\n\n` +
+          `**🔥 Tip:**\n` +
+          `Na chrumkavú kožu zvýš posledných 5 minút na **220 °C**`
+        )
+        .setFooter({ text: 'Dobrú chuť 😋 | bestpro bot' })
+    ]
+  });
+}
+
   
 });
 
