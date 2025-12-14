@@ -454,7 +454,7 @@ if (command === 'avatar') {
         .setTitle(`🖼️ Avatar – ${target.tag}`)
         .setColor(COLOR)
         .setImage(avatarUrl)
-        .setFooter({ text: 'Klikni pravým → Otvoriť obrázok' })
+      
     ]
   });
 }
