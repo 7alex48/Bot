@@ -1,7 +1,8 @@
 console.log('TOKEN:', !!process.env.DISCORD_TOKEN);
 const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder,
   ButtonBuilder,
-  ButtonStyle } = require('discord.js');
+  ButtonStyle,   SlashCommandBuilder,
+  PermissionFlagsBits} = require('discord.js');
 
 const ADMIN_ROLE_ID = '1448769935642853376';
 const PREFIX = '!';
@@ -461,8 +462,47 @@ if (command === 'avatar') {
 
   
 });
+client.on('interactionCreate', async interaction => {
+  if (!interaction.isChatInputCommand()) return;
 
+  if (interaction.commandName === 'say') {
+    const text = interaction.options.getString('text');
 
+    await interaction.channel.send(text);
 
+    return interaction.reply({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(0x57F287)
+          .setDescription('✅ Správa bola odoslaná.')
+      ],
+      ephemeral: true
+    });
+  }
+});
+
+client.once('ready', async () => {
+  console.log(`✅ Prihlásený ako ${client.user.tag}`);
+
+  client.user.setPresence({
+    activities: [{ name: 'bestpro', type: 4 }],
+    status: 'online'
+  });
+
+  const data = [
+    new SlashCommandBuilder()
+      .setName('say')
+      .setDescription('Napíš správu cez bota')
+      .addStringOption(option =>
+        option
+          .setName('text')
+          .setDescription('Text, ktorý má bot poslať')
+          .setRequired(true)
+      )
+      .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
+  ];
+
+  await client.application.commands.set(data);
+});
 
 client.login(process.env.DISCORD_TOKEN);
