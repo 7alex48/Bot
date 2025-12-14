@@ -1,3 +1,4 @@
+console.log('TOKEN:', JSON.stringify(process.env.DISCORD_TOKEN));
 const { Client, GatewayIntentBits } = require('discord.js');
 
 const client = new Client({
