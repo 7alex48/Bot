@@ -1,4 +1,4 @@
-Console.log('TOKEN:', !!process.env.DISCORD_TOKEN);
+console.log('TOKEN:', !!process.env.DISCORD_TOKEN);
 const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,   SlashCommandBuilder,
