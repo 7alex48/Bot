@@ -569,6 +569,42 @@ if (command === 'kuraciestehna') {
     });
   }
 }
+  if (command === 'nsfwlink') {
+  // kontrola NSFW channelu
+  if (!message.channel.nsfw) {
+    return message.reply({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(0xED4245)
+          .setDescription('🔞 Tento príkaz je povolený iba v NSFW kanáloch.')
+      ]
+    });
+  }
+
+  // zoznam linkov (môžeš si zmeniť / doplniť)
+  const links = [
+    'https://www.reddit.com/r/nsfw/',
+    'https://www.reddit.com/r/gonewild/',
+    'https://www.reddit.com/r/realgirls/',
+    'https://www.reddit.com/r/nsfwcosplay/',
+    'https://www.reddit.com/r/nsfw_gifs/'
+  ];
+
+  const randomLink = links[Math.floor(Math.random() * links.length)];
+
+  return message.channel.send({
+    embeds: [
+      new EmbedBuilder()
+        .setTitle('🔞 NSFW odkaz')
+        .setColor(0xED4245)
+        .setDescription(
+          `⚠️ **Obsah je určený len pre dospelých (18+)**\n\n` +
+          `👉 ${randomLink}`
+        )
+        .setFooter({ text: 'Bot neposkytuje obsah, iba odkaz' })
+    ]
+  });
+}
 
   
 });
