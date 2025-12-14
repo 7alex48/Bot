@@ -253,4 +253,32 @@ client.on('messageCreate', async message => {
   }
 });
 
+
+if (command === 'rate') {
+  const target = message.mentions.members.first() || message.member;
+
+  const percent = Math.floor(Math.random() * 101);
+
+  let verdict = "sprosty kokot;
+  if (percent > 80) verdict = 'no da sa';
+  else if (percent > 60) verdict = 'mas v tej hlave nieco';
+  else if (percent > 40) verdict = 'uz v tej hlave skoro nemas nic';
+  else if (percent > 20) verdict = 'vygumovany kar';
+  else verdict = 'ty si pekne v piči';
+
+  return message.channel.send({
+    embeds: [
+      new EmbedBuilder()
+        .setTitle(' Hodnotenie')
+        .setColor(COLOR)
+        .setDescription(
+          `👤 **${target.user.tag}**\n\n` +
+          ` Skóre: **${percent} %**\n` +
+          ` Verdikt: *${verdict}*`
+        )
+        .setFooter({ text: 'Vážna Vec' })
+    ]
+  });
+}
+
 client.login(process.env.DISCORD_TOKEN);
