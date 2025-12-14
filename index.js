@@ -15,6 +15,16 @@ const client = new Client({
 
 client.once('ready', () => {
   console.log(`✅ Prihlásený ako ${client.user.tag}`);
+
+  client.user.setPresence({
+    activities: [
+      {
+        name: 'bestpro',
+        type: 4 // CUSTOM STATUS
+      }
+    ],
+    status: 'online'
+  });
 });
 
 client.on('messageCreate', async message => {
