@@ -644,7 +644,13 @@ if (command === 'nsfwreddit') {
   });
 
   try {
-    const response = await fetch(redditAPI);
+        const response = await fetch(redditAPI, {
+        headers: {
+            // POZOR: Vymeň "tvoj-username" a "v1.0" za niečo relevantné k tvojmu botovi
+            'User-Agent': 'DiscordBot:bestpro-nsfw-fetcher:v1.0 (by /u/7alex48 )'
+        }
+    });
+
     
     if (!response.ok) {
         throw new Error(`Reddit API chyba, status: ${response.status}`);
