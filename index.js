@@ -607,10 +607,8 @@ if (command === 'kuraciestehna') {
 }
   
 
-// Uistite sa, že tento kód je vo vnútri asynchrónnej funkcie,
-// napr. v tvojom message event listeneri: client.on('messageCreate', async (message) => { ...
 // ======================================================================
-// ===== NSFW REDDIT (OPRAVENÁ VERZIA) =====
+// ===== NSFW REDDIT (OPRAVENÝ BLOK) =====
 // ======================================================================
 if (command === 'nsfwreddit') {
 
@@ -625,7 +623,7 @@ if (command === 'nsfwreddit') {
     });
   }
 
-  // Zoznam subreditov
+  // Zoznam subreditov (tu je jeden pridaný oproti tvojej verzii)
   const subreddits = [
     'nsfw', 'gonewild', 'realgirls', 'nsfwcosplay', 'Amateur' 
   ];
@@ -635,8 +633,8 @@ if (command === 'nsfwreddit') {
   
   // JSON endpoint: Získanie "hot" postov, 50 pre dostatočný výber
   const redditAPI = `https://www.reddit.com/r/${randomSubreddit}/hot.json?limit=50`;
-  
-  // Odoslanie správy, že sa dáta načítavajú (pre lepšiu odozvu)
+
+  // Najprv pošleme správu o načítavaní
   const loadingMessage = await message.channel.send({
       embeds: [
           new EmbedBuilder()
@@ -649,13 +647,10 @@ if (command === 'nsfwreddit') {
     const response = await fetch(redditAPI);
     
     if (!response.ok) {
-        // Ak Reddit API vráti chybu (napr. 404, 403)
         throw new Error(`Reddit API chyba, status: ${response.status}`);
     }
 
     const data = await response.json();
-    
-    // Získanie poľa všetkých postov (Children)
     const posts = data.data.children;
     
     if (!posts || posts.length === 0) {
@@ -663,16 +658,13 @@ if (command === 'nsfwreddit') {
     }
 
     // 2. Filtrovanie a výber obrázku
-    
-    // Filtrujeme pole, aby obsahovalo len posty, ktoré sú priamymi URL obrázkov
     const imagePosts = posts.filter(post => {
         const url = post.data.url;
-        // Kontrolujeme, či URL končí na bežné obrázkové/gífové prípony
+        // Kontrola, či URL končí na bežné obrázkové/gífové prípony
         return url.endsWith('.jpg') || url.endsWith('.png') || url.endsWith('.gif') || url.endsWith('.jpeg');
     });
 
     if (imagePosts.length === 0) {
-        // Ak sa v celej dávke nenašiel žiadny priamy obrázok
         await loadingMessage.edit({
             embeds: [
                 new EmbedBuilder()
@@ -683,18 +675,16 @@ if (command === 'nsfwreddit') {
         return;
     }
 
-    // Vyberieme náhodný post z už filtrovaného zoznamu
     const selectedPost = imagePosts[Math.floor(Math.random() * imagePosts.length)].data;
     const imageUrl = selectedPost.url;
     
     // 3. Odoslanie Embedu
-    
     const embed = new EmbedBuilder()
           .setTitle(selectedPost.title.substring(0, 256) || `🔞 NSFW Post z r/${randomSubreddit}`)
-          .setURL(`https://reddit.com${selectedPost.permalink}`) // Odkaz na Reddit post
+          .setURL(`https://reddit.com${selectedPost.permalink}`)
           .setColor(0xED4245)
           .setDescription(`Zdieľaný obrázok z r/**${randomSubreddit}**`)
-          .setImage(imageUrl) // Vloží obrázok
+          .setImage(imageUrl)
           .setFooter({ text: `⬆️ ${selectedPost.score} Upvotes | Autor: u/${selectedPost.author}` });
           
     await loadingMessage.edit({ embeds: [embed] });
@@ -707,12 +697,14 @@ if (command === 'nsfwreddit') {
           .setColor(0xFF0000)
           .setDescription(`❌ Nastala chyba pri komunikácii s Redditom: ${error.message.substring(0, 150)}`);
           
+    // Použijeme loadingMessage, ak ešte existuje
     await loadingMessage.edit({ embeds: [errorEmbed] });
   }
 }
+// ======================================================================
+// KONIEC BLOKU
+// ======================================================================
 
-  }
-}
 
 // ===== NSFW TOGGLE =====
 if (command === 'nsfw') {
