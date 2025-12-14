@@ -305,6 +305,77 @@ if (command === 'meme') {
   }
 }
   
+  if (command === 'roblox') {
+  const username = args[0];
+  if (!username) {
+    return message.reply({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(0xED4245)
+          .setDescription('❌ Použitie: `!roblox username`')
+      ]
+    });
+  }
+
+  try {
+    // 1️⃣ Získať user ID podľa username
+    const userRes = await fetch('https://users.roblox.com/v1/usernames/users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        usernames: [username],
+        excludeBannedUsers: false
+      })
+    });
+
+    const userData = await userRes.json();
+    if (!userData.data || userData.data.length === 0) {
+      return message.channel.send({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(0xED4245)
+            .setDescription('❌ Roblox user nebol nájdený.')
+        ]
+      });
+    }
+
+    const user = userData.data[0];
+
+    // 2️⃣ Avatar
+    const avatarRes = await fetch(
+      `https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${user.id}&size=420x420&format=Png&isCircular=false`
+    );
+    const avatarData = await avatarRes.json();
+    const avatarUrl = avatarData.data[0]?.imageUrl;
+
+    // 3️⃣ Embed
+    const embed = new EmbedBuilder()
+      .setTitle('🎮 Roblox profil')
+      .setColor(0x00A2FF)
+      .setThumbnail(avatarUrl)
+      .addFields(
+        { name: '👤 Username', value: user.name, inline: true },
+        { name: '🆔 User ID', value: String(user.id), inline: true },
+        {
+          name: '📅 Created',
+          value: `<t:${Math.floor(new Date(user.created).getTime() / 1000)}:R>`,
+          inline: true
+        }
+      )
+      .setFooter({ text: 'Roblox API' });
+
+    return message.channel.send({ embeds: [embed] });
+
+  } catch (err) {
+    return message.channel.send({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(0xED4245)
+          .setDescription('❌ Chyba pri načítaní Roblox dát.')
+      ]
+    });
+  }
+}
   
 });
 
