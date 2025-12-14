@@ -606,6 +606,58 @@ if (command === 'kuraciestehna') {
   });
 }
 
+// ===== NSFW TOGGLE =====
+if (command === 'nsfw') {
+  // permission check
+  if (!message.member.permissions.has('ManageChannels')) {
+    return message.reply({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(0xED4245)
+          .setDescription('❌ Nemáš oprávnenie spravovať kanály.')
+      ]
+    });
+  }
+
+  const option = args[0];
+
+  if (!['on', 'off'].includes(option)) {
+    return message.reply({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(0xFAA61A)
+          .setDescription('Použitie: `!nsfw on` alebo `!nsfw off`')
+      ]
+    });
+  }
+
+  const enable = option === 'on';
+
+  try {
+    await message.channel.setNSFW(enable);
+
+    return message.channel.send({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(enable ? 0xED4245 : 0x57F287)
+          .setDescription(
+            enable
+              ? '🔞 Tento kanál je teraz **NSFW**.'
+              : '✅ NSFW bolo **vypnuté** pre tento kanál.'
+          )
+      ]
+    });
+  } catch (err) {
+    return message.channel.send({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(0xED4245)
+          .setDescription('❌ Nepodarilo sa zmeniť NSFW nastavenie kanála.')
+      ]
+    });
+  }
+}
+
   
 });
 
