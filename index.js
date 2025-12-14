@@ -480,6 +480,96 @@ if (command === 'kuraciestehna') {
   });
 }
 
+  if (command === 'recept') {
+  const query = args.join(' ');
+  if (!query) {
+    return message.reply({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(0xED4245)
+          .setDescription('❌ Použitie: `!recept názov_jedla`')
+      ]
+    });
+  }
+
+  try {
+    // 1️⃣ Fetch recept
+    const mealRes = await fetch(
+      `https://www.themealdb.com/api/json/v1/1/search.php?s=${encodeURIComponent(query)}`
+    );
+    const mealData = await mealRes.json();
+
+    if (!mealData.meals) {
+      return message.channel.send({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(0xFAA61A)
+            .setDescription(`❌ Recept **${query}** sa nenašiel.`)
+        ]
+      });
+    }
+
+    const meal = mealData.meals[0];
+
+    // 2️⃣ Ingrediencie
+    let ingredientsEN = '';
+    for (let i = 1; i <= 20; i++) {
+      const ing = meal[`strIngredient${i}`];
+      const measure = meal[`strMeasure${i}`];
+      if (ing && ing.trim()) {
+        ingredientsEN += `${ing} ${measure}\n`;
+      }
+    }
+
+    // 3️⃣ PREKLAD FUNKCIA
+    async function translate(text) {
+      const res = await fetch('https://libretranslate.de/translate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          q: text,
+          source: 'en',
+          target: 'sk',
+          format: 'text'
+        })
+      });
+      const data = await res.json();
+      return data.translatedText;
+    }
+
+    const ingredientsSK = await translate(ingredientsEN);
+    const instructionsSK = await translate(meal.strInstructions);
+
+    // 4️⃣ EMBED
+    const embed = new EmbedBuilder()
+      .setTitle(`🍽️ ${meal.strMeal} (SK)`)
+      .setColor(COLOR)
+      .setThumbnail(meal.strMealThumb)
+      .addFields(
+        {
+          name: '📝 Ingrediencie',
+          value: ingredientsSK.slice(0, 1024)
+        },
+        {
+          name: '👨‍🍳 Postup',
+          value: instructionsSK.slice(0, 1024)
+        }
+      )
+      .setFooter({ text: 'Automatický preklad • bestpro bot' });
+
+    return message.channel.send({ embeds: [embed] });
+
+  } catch (err) {
+    return message.channel.send({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(0xED4245)
+          .setDescription('❌ Chyba pri načítaní receptu.')
+      ]
+    });
+  }
+}
+
   
 });
 
