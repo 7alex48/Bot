@@ -280,6 +280,31 @@ if (command === 'rate') {
   });
 }
 
+if (command === 'meme') {
+  try {
+    const res = await fetch('https://meme-api.com/gimme');
+    const data = await res.json();
+
+    const memeEmbed = new EmbedBuilder()
+      .setTitle(data.title || 'Random Meme')
+      .setColor(COLOR)
+      .setImage(data.url)
+      .setFooter({
+        text: ` ${data.ups || 0} | r/${data.subreddit || 'memes'}`
+      });
+
+    return message.channel.send({ embeds: [memeEmbed] });
+  } catch (err) {
+    return message.channel.send({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(0xED4245)
+          .setDescription('failed')
+      ]
+    });
+  }
+}
+  
   
 });
 
