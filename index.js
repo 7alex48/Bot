@@ -438,6 +438,27 @@ if (command === 'roblox') {
     });
   }
 }
+  // ===== AVATAR =====
+if (command === 'avatar') {
+  const target = message.mentions.users.first() || message.author;
+
+  const avatarUrl = target.displayAvatarURL({
+    size: 1024,
+    extension: 'png',
+    forceStatic: false
+  });
+
+  return message.channel.send({
+    embeds: [
+      new EmbedBuilder()
+        .setTitle(`🖼️ Avatar – ${target.tag}`)
+        .setColor(COLOR)
+        .setImage(avatarUrl)
+        .setFooter({ text: 'Klikni pravým → Otvoriť obrázok' })
+    ]
+  });
+}
+
   
 });
 
