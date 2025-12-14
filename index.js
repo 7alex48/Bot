@@ -1,5 +1,7 @@
 console.log('TOKEN:', !!process.env.DISCORD_TOKEN);
-const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle } = require('discord.js');
 
 const ADMIN_ROLE_ID = '1448769935642853376';
 const PREFIX = '!';
@@ -305,7 +307,7 @@ if (command === 'meme') {
   }
 }
   
-  if (command === 'roblox') {
+if (command === 'roblox') {
   const username = args[0];
   if (!username) {
     return message.reply({
@@ -318,7 +320,7 @@ if (command === 'meme') {
   }
 
   try {
-    // 1️⃣ Získať user ID podľa username
+    // 1️⃣ USER INFO
     const userRes = await fetch('https://users.roblox.com/v1/usernames/users', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -329,7 +331,7 @@ if (command === 'meme') {
     });
 
     const userData = await userRes.json();
-    if (!userData.data || userData.data.length === 0) {
+    if (!userData.data?.length) {
       return message.channel.send({
         embeds: [
           new EmbedBuilder()
@@ -341,18 +343,54 @@ if (command === 'meme') {
 
     const user = userData.data[0];
 
-    // 2️⃣ Avatar
+    // 2️⃣ AVATAR
     const avatarRes = await fetch(
-      `https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${user.id}&size=420x420&format=Png&isCircular=false`
+      `https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${user.id}&size=420x420&format=Png`
     );
     const avatarData = await avatarRes.json();
     const avatarUrl = avatarData.data[0]?.imageUrl;
 
-    // 3️⃣ Embed
+    // 3️⃣ OUTFIT (full body)
+    const outfitRes = await fetch(
+      `https://thumbnails.roblox.com/v1/users/avatar?userIds=${user.id}&size=720x720&format=Png`
+    );
+    const outfitData = await outfitRes.json();
+    const outfitUrl = outfitData.data[0]?.imageUrl;
+
+    // 4️⃣ STATUS
+    const statusRes = await fetch(
+      `https://presence.roblox.com/v1/presence/users`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userIds: [user.id] })
+      }
+    );
+    const statusData = await statusRes.json();
+    const presence = statusData.userPresences?.[0];
+
+    let statusText = '⚫ Offline';
+    if (presence?.userPresenceType === 1) statusText = '🟢 Online';
+    if (presence?.userPresenceType === 2)
+      statusText = `🎮 In Game (${presence.lastLocation || 'Roblox'})`;
+
+    // 5️⃣ FRIENDS / FOLLOWERS
+    const friendsRes = await fetch(
+      `https://friends.roblox.com/v1/users/${user.id}/friends/count`
+    );
+    const followersRes = await fetch(
+      `https://friends.roblox.com/v1/users/${user.id}/followers/count`
+    );
+
+    const friends = (await friendsRes.json()).count;
+    const followers = (await followersRes.json()).count;
+
+    // 6️⃣ EMBED
     const embed = new EmbedBuilder()
-      .setTitle('🎮 Roblox profil')
+      .setTitle(`🎮 Roblox profil – ${user.name}`)
       .setColor(0x00A2FF)
       .setThumbnail(avatarUrl)
+      .setImage(outfitUrl)
       .addFields(
         { name: '👤 Username', value: user.name, inline: true },
         { name: '🆔 User ID', value: String(user.id), inline: true },
@@ -360,11 +398,35 @@ if (command === 'meme') {
           name: '📅 Created',
           value: `<t:${Math.floor(new Date(user.created).getTime() / 1000)}:R>`,
           inline: true
-        }
+        },
+        { name: '📡 Status', value: statusText, inline: true },
+        { name: '👥 Friends', value: String(friends), inline: true },
+        { name: '⭐ Followers', value: String(followers), inline: true }
       )
-      .setFooter({ text: 'Roblox API' });
+      .setFooter({ text: 'Roblox API • bestpro bot' });
 
-    return message.channel.send({ embeds: [embed] });
+    // 7️⃣ BUTTONS
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setLabel('🔗 Open Profile')
+        .setStyle(ButtonStyle.Link)
+        .setURL(`https://www.roblox.com/users/${user.id}/profile`),
+
+      new ButtonBuilder()
+        .setLabel('🧢 Inventory')
+        .setStyle(ButtonStyle.Link)
+        .setURL(`https://www.roblox.com/users/${user.id}/inventory`),
+
+      new ButtonBuilder()
+        .setLabel('🎽 Outfit')
+        .setStyle(ButtonStyle.Link)
+        .setURL(`https://www.roblox.com/users/${user.id}/avatar`)
+    );
+
+    return message.channel.send({
+      embeds: [embed],
+      components: [row]
+    });
 
   } catch (err) {
     return message.channel.send({
