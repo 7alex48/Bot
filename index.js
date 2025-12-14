@@ -251,7 +251,6 @@ client.on('messageCreate', async message => {
       ]
     });
   }
-});
 
 
 if (command === 'rate') {
@@ -280,5 +279,11 @@ if (command === 'rate') {
     ]
   });
 }
+
+  
+});
+
+
+
 
 client.login(process.env.DISCORD_TOKEN);
