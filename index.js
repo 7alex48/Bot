@@ -609,9 +609,12 @@ if (command === 'kuraciestehna') {
 
 // Uistite sa, že tento kód je vo vnútri asynchrónnej funkcie,
 // napr. v tvojom message event listeneri: client.on('messageCreate', async (message) => { ...
+// ======================================================================
+// ===== NSFW REDDIT (OPRAVENÁ VERZIA) =====
+// ======================================================================
 if (command === 'nsfwreddit') {
 
-  // 1. Kontrola NSFW kanálu (ostáva rovnaká)
+  // 1. Kontrola NSFW kanálu
   if (!message.channel.nsfw) {
     return message.reply({
       embeds: [
@@ -622,88 +625,92 @@ if (command === 'nsfwreddit') {
     });
   }
 
-  // Zoznam NSFW subredditov, z ktorých sa má vybrať náhodný post
+  // Zoznam subreditov
   const subreddits = [
-    'nsfw', 'gonewild', 'realgirls', 'nsfwcosplay' 
-    // Pridaj sem svoje preferované subreddity
+    'nsfw', 'gonewild', 'realgirls', 'nsfwcosplay', 'Amateur' 
   ];
   
+  // Zvolenie náhodného subredditu
   const randomSubreddit = subreddits[Math.floor(Math.random() * subreddits.length)];
   
-  // JSON endpoint pre získanie hot/new/top postov subredditu. 
-  // Pridávame '?limit=50' pre väčšiu náhodnosť.
+  // JSON endpoint: Získanie "hot" postov, 50 pre dostatočný výber
   const redditAPI = `https://www.reddit.com/r/${randomSubreddit}/hot.json?limit=50`;
+  
+  // Odoslanie správy, že sa dáta načítavajú (pre lepšiu odozvu)
+  const loadingMessage = await message.channel.send({
+      embeds: [
+          new EmbedBuilder()
+              .setDescription(`⏳ Načítavam NSFW post z r/${randomSubreddit}...`)
+              .setColor(0xFEE75C)
+      ]
+  });
 
   try {
     const response = await fetch(redditAPI);
     
     if (!response.ok) {
-        // Spracovanie chyby, ak Reddit nevrátil dáta (napr. 404/403)
+        // Ak Reddit API vráti chybu (napr. 404, 403)
         throw new Error(`Reddit API chyba, status: ${response.status}`);
     }
 
     const data = await response.json();
     
-    // Získanie poľa všetkých postov
+    // Získanie poľa všetkých postov (Children)
     const posts = data.data.children;
     
     if (!posts || posts.length === 0) {
         throw new Error('Nepodarilo sa nájsť žiadne posty na subreddite.');
     }
 
-    let selectedPost = null;
-    let imageUrl = null;
-    let postTitle = null;
-
-    // 2. Náhodný výber POSTu a filtrovanie len na obrázky
-    // Postupne prejdeme posty a vyberieme ten, ktorý je obrázok
-    for (let i = 0; i < 50; i++) {
-        // Náhodný výber postu
-        const post = posts[Math.floor(Math.random() * posts.length)];
+    // 2. Filtrovanie a výber obrázku
+    
+    // Filtrujeme pole, aby obsahovalo len posty, ktoré sú priamymi URL obrázkov
+    const imagePosts = posts.filter(post => {
         const url = post.data.url;
-        
-        // Kontrola, či URL končí na bežnú obrázkovú príponu
-        if (url.endsWith('.jpg') || url.endsWith('.png') || url.endsWith('.gif')) {
-            selectedPost = post.data;
-            imageUrl = url;
-            postTitle = selectedPost.title;
-            break; // Máme obrázok, môžeme skončiť cyklus
-        }
-    }
+        // Kontrolujeme, či URL končí na bežné obrázkové/gífové prípony
+        return url.endsWith('.jpg') || url.endsWith('.png') || url.endsWith('.gif') || url.endsWith('.jpeg');
+    });
 
-    if (!imageUrl) {
-        return message.reply({
+    if (imagePosts.length === 0) {
+        // Ak sa v celej dávke nenašiel žiadny priamy obrázok
+        await loadingMessage.edit({
             embeds: [
                 new EmbedBuilder()
                     .setColor(0xFF8800)
-                    .setDescription(`❌ V aktuálnej dávke postov (${randomSubreddit}) sa nenašiel priamy obrázok.`)
+                    .setDescription(`❌ V aktuálnej dávke postov (**r/${randomSubreddit}**) sa nenašiel priamy obrázok. Skús znova!`)
             ]
         });
+        return;
     }
 
-    // 3. Odoslanie Embedu s obrázkom
-    return message.channel.send({
-      embeds: [
-        new EmbedBuilder()
-          .setTitle(postTitle || `🔞 NSFW Post z r/${randomSubreddit}`)
-          .setURL(`https://reddit.com${selectedPost.permalink}`) // Odkaz na post
+    // Vyberieme náhodný post z už filtrovaného zoznamu
+    const selectedPost = imagePosts[Math.floor(Math.random() * imagePosts.length)].data;
+    const imageUrl = selectedPost.url;
+    
+    // 3. Odoslanie Embedu
+    
+    const embed = new EmbedBuilder()
+          .setTitle(selectedPost.title.substring(0, 256) || `🔞 NSFW Post z r/${randomSubreddit}`)
+          .setURL(`https://reddit.com${selectedPost.permalink}`) // Odkaz na Reddit post
           .setColor(0xED4245)
-          .setDescription(`Zvolený obrázok z r/**${randomSubreddit}**`)
-          // Kľúčové: Vloží URL priamo do Embedu ako obrázok
-          .setImage(imageUrl) 
-          .setFooter({ text: `⬆️ ${selectedPost.score} Upvotes | Autor: u/${selectedPost.author}` })
-      ]
-    });
+          .setDescription(`Zdieľaný obrázok z r/**${randomSubreddit}**`)
+          .setImage(imageUrl) // Vloží obrázok
+          .setFooter({ text: `⬆️ ${selectedPost.score} Upvotes | Autor: u/${selectedPost.author}` });
+          
+    await loadingMessage.edit({ embeds: [embed] });
 
   } catch (error) {
     console.error('Chyba pri získavaní NSFW z Redditu:', error);
-    return message.reply({
-      embeds: [
-        new EmbedBuilder()
+    
+    // Odpoveď pri chybe
+    const errorEmbed = new EmbedBuilder()
           .setColor(0xFF0000)
-          .setDescription(`❌ Nastala neočakávaná chyba pri komunikácii s Redditom.`)
-      ]
-    });
+          .setDescription(`❌ Nastala chyba pri komunikácii s Redditom: ${error.message.substring(0, 150)}`);
+          
+    await loadingMessage.edit({ embeds: [errorEmbed] });
+  }
+}
+
   }
 }
 
