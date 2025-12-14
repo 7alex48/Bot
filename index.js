@@ -523,7 +523,7 @@ if (command === 'kuraciestehna') {
 
     // 3️⃣ PREKLAD FUNKCIA
     async function translate(text) {
-      const res = await fetch('https://libretranslate.de/translate', {
+      const res = await fetch('https://translate.astian.org/translate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
