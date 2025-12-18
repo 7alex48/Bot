@@ -32,16 +32,16 @@ const client = new Client({
 });
 
 /* ================= STORAGE ================= */
-const guildConfig = new Map(); // guildId -> { supportRoleId, ticketCategoryId }
-const ticketTimers = new Map(); // channelId -> timeout
-const verifyRequests = new Map(); // verifyId -> data
+const guildConfig = new Map();
+const ticketTimers = new Map();
+const verifyRequests = new Map();
 
 /* ================= HELPERS ================= */
 const errorEmbed = t => new EmbedBuilder().setColor(0xED4245).setDescription(`❌ ${t}`);
 const okEmbed = t => new EmbedBuilder().setColor(0x57F287).setDescription(`✅ ${t}`);
 
-function cleanName(name) {
-  return name.toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 80);
+function cleanName(n) {
+  return n.toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 80);
 }
 
 async function ensureTicketCategory(guild) {
@@ -68,14 +68,12 @@ async function userHasTicket(guild, userId) {
 
 function startAutoClose(channel) {
   if (ticketTimers.has(channel.id)) clearTimeout(ticketTimers.get(channel.id));
-
   const timer = setTimeout(async () => {
     await channel.send({
       embeds: [new EmbedBuilder().setColor(0xED4245).setDescription('⏰ Ticket closed due to inactivity.')]
     });
     setTimeout(() => channel.delete().catch(() => {}), 5000);
   }, AUTO_CLOSE_MS);
-
   ticketTimers.set(channel.id, timer);
 }
 
@@ -86,11 +84,15 @@ async function deployCommands() {
       .setName('setup')
       .setDescription('Setup ticket system')
       .addChannelOption(o =>
-        o.setName('channel').setDescription('Ticket panel channel').setRequired(true)
+        o.setName('channel')
+          .setDescription('Ticket panel channel')
+          .setRequired(true)
           .addChannelTypes(ChannelType.GuildText)
       )
       .addRoleOption(o =>
-        o.setName('support').setDescription('Support role').setRequired(true)
+        o.setName('support')
+          .setDescription('Support role')
+          .setRequired(true)
       )
       .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
@@ -98,54 +100,92 @@ async function deployCommands() {
       .setName('verify')
       .setDescription('Send delivery verification request')
       .addUserOption(o =>
-        o.setName('user').setDescription('Customer').setRequired(true)
+        o.setName('user')
+          .setDescription('Customer')
+          .setRequired(true)
       )
       .addStringOption(o =>
-        o.setName('message').setDescription('Message').setRequired(true)
+        o.setName('message')
+          .setDescription('Message to customer')
+          .setRequired(true)
       )
       .addAttachmentOption(o =>
-        o.setName('proof').setDescription('Image proof').setRequired(true)
+        o.setName('proof')
+          .setDescription('Image proof')
+          .setRequired(true)
       )
       .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
     new SlashCommandBuilder()
       .setName('warn')
       .setDescription('Warn a user')
-      .addUserOption(o => o.setName('user').setDescription('User').setRequired(true))
-      .addStringOption(o => o.setName('reason').setDescription('Reason'))
+      .addUserOption(o =>
+        o.setName('user')
+          .setDescription('User')
+          .setRequired(true)
+      )
+      .addStringOption(o =>
+        o.setName('reason')
+          .setDescription('Reason')
+      )
       .setDefaultMemberPermissions(PermissionFlagsBits.KickMembers),
 
     new SlashCommandBuilder()
       .setName('kick')
       .setDescription('Kick a user')
-      .addUserOption(o => o.setName('user').setDescription('User').setRequired(true))
-      .addStringOption(o => o.setName('reason').setDescription('Reason'))
+      .addUserOption(o =>
+        o.setName('user')
+          .setDescription('User')
+          .setRequired(true)
+      )
+      .addStringOption(o =>
+        o.setName('reason')
+          .setDescription('Reason')
+      )
       .setDefaultMemberPermissions(PermissionFlagsBits.KickMembers),
 
     new SlashCommandBuilder()
       .setName('ban')
       .setDescription('Ban a user')
-      .addUserOption(o => o.setName('user').setDescription('User').setRequired(true))
-      .addStringOption(o => o.setName('reason').setDescription('Reason'))
+      .addUserOption(o =>
+        o.setName('user')
+          .setDescription('User')
+          .setRequired(true)
+      )
+      .addStringOption(o =>
+        o.setName('reason')
+          .setDescription('Reason')
+      )
       .setDefaultMemberPermissions(PermissionFlagsBits.BanMembers),
 
     new SlashCommandBuilder()
       .setName('clear')
       .setDescription('Clear messages')
       .addIntegerOption(o =>
-        o.setName('amount').setDescription('1-100').setRequired(true).setMinValue(1).setMaxValue(100)
+        o.setName('amount')
+          .setDescription('1-100')
+          .setRequired(true)
+          .setMinValue(1)
+          .setMaxValue(100)
       )
       .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages),
 
     new SlashCommandBuilder()
       .setName('userinfo')
       .setDescription('User info')
-      .addUserOption(o => o.setName('user').setDescription('Target user')),
+      .addUserOption(o =>
+        o.setName('user')
+          .setDescription('Target user')
+      ),
 
     new SlashCommandBuilder()
       .setName('say')
       .setDescription('Bot sends a message (owner only)')
-      .addStringOption(o => o.setName('text').setDescription('Text').setRequired(true))
+      .addStringOption(o =>
+        o.setName('text')
+          .setDescription('Text')
+          .setRequired(true)
+      )
   ];
 
   await client.application.commands.set(commands);
@@ -154,11 +194,12 @@ async function deployCommands() {
 /* ================= INTERACTIONS ================= */
 client.on('interactionCreate', async interaction => {
 
-  /* ===== SLASH ===== */
+  /* ===== SLASH COMMANDS ===== */
   if (interaction.isChatInputCommand()) {
+    const cmd = interaction.commandName;
 
     /* SETUP */
-    if (interaction.commandName === 'setup') {
+    if (cmd === 'setup') {
       const channel = interaction.options.getChannel('channel');
       const role = interaction.options.getRole('support');
       const cat = await ensureTicketCategory(interaction.guild);
@@ -169,11 +210,9 @@ client.on('interactionCreate', async interaction => {
       });
 
       const embed = new EmbedBuilder()
-        .setTitle('🎫 Support Center')
         .setColor(COLOR)
-        .setDescription(
-          '**Need help or want to buy?**\n\nChoose an option below.\nTickets are private.'
-        );
+        .setTitle('🎫 Support Center')
+        .setDescription('Choose **BUY** or **SUPPORT** below. Tickets are private.');
 
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('ticket_buy').setLabel('💳 BUY').setStyle(ButtonStyle.Success),
@@ -185,7 +224,7 @@ client.on('interactionCreate', async interaction => {
     }
 
     /* VERIFY */
-    if (interaction.commandName === 'verify') {
+    if (cmd === 'verify') {
       const target = interaction.options.getUser('user');
       const message = interaction.options.getString('message');
       const proof = interaction.options.getAttachment('proof');
@@ -197,7 +236,6 @@ client.on('interactionCreate', async interaction => {
       const verifyId = `${interaction.id}-${Date.now()}`;
       verifyRequests.set(verifyId, {
         channelId: interaction.channel.id,
-        userId: target.id,
         imageUrl: proof.url
       });
 
@@ -211,29 +249,113 @@ client.on('interactionCreate', async interaction => {
         ]
       });
 
-      try {
-        const dmEmbed = new EmbedBuilder()
-          .setColor(COLOR)
-          .setTitle('✅ Delivery Confirmation')
-          .setDescription(message)
-          .setImage(proof.url);
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(`verify_yes_${verifyId}`).setLabel('✅ Confirm').setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId(`verify_no_${verifyId}`).setLabel('❌ Reject').setStyle(ButtonStyle.Danger)
+      );
 
-        const row = new ActionRowBuilder().addComponents(
-          new ButtonBuilder().setCustomId(`verify_yes_${verifyId}`).setLabel('✅ Confirm').setStyle(ButtonStyle.Success),
-          new ButtonBuilder().setCustomId(`verify_no_${verifyId}`).setLabel('❌ Reject').setStyle(ButtonStyle.Danger)
-        );
+      await target.send({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(COLOR)
+            .setTitle('Delivery Confirmation')
+            .setDescription(message)
+            .setImage(proof.url)
+        ],
+        components: [row]
+      });
+    }
 
-        await target.send({ embeds: [dmEmbed], components: [row] });
-      } catch {
-        return interaction.followUp({ embeds: [errorEmbed('Could not DM the user.')], ephemeral: true });
-      }
+    /* ADMIN COMMANDS */
+    if (['warn', 'kick', 'ban'].includes(cmd)) {
+      const user = interaction.options.getUser('user');
+      const reason = interaction.options.getString('reason') || 'No reason';
+      const member = await interaction.guild.members.fetch(user.id).catch(() => null);
+      if (!member) return interaction.reply({ embeds: [errorEmbed('User not found')], ephemeral: true });
+
+      if (cmd === 'kick') await member.kick(reason);
+      if (cmd === 'ban') await member.ban({ reason });
+
+      return interaction.reply({ embeds: [okEmbed(`${cmd.toUpperCase()} executed.`)] });
+    }
+
+    if (cmd === 'clear') {
+      const amount = interaction.options.getInteger('amount');
+      await interaction.channel.bulkDelete(amount, true);
+      return interaction.reply({ embeds: [okEmbed(`Deleted ${amount} messages.`)], ephemeral: true });
+    }
+
+    if (cmd === 'userinfo') {
+      const user = interaction.options.getUser('user') || interaction.user;
+      const member = interaction.guild.members.cache.get(user.id);
+      return interaction.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(COLOR)
+            .setTitle('👤 User Info')
+            .addFields(
+              { name: 'Tag', value: user.tag, inline: true },
+              { name: 'ID', value: user.id, inline: true },
+              {
+                name: 'Joined',
+                value: member?.joinedTimestamp
+                  ? `<t:${Math.floor(member.joinedTimestamp / 1000)}:R>`
+                  : 'Unknown',
+                inline: true
+              }
+            )
+        ]
+      });
+    }
+
+    if (cmd === 'say') {
+      if (interaction.user.id !== OWNER_ID)
+        return interaction.reply({ embeds: [errorEmbed('Owner only')], ephemeral: true });
+
+      await interaction.channel.send({
+        embeds: [new EmbedBuilder().setColor(COLOR).setDescription(interaction.options.getString('text'))]
+      });
+      return interaction.reply({ embeds: [okEmbed('Message sent.')], ephemeral: true });
     }
   }
 
   /* ===== BUTTONS ===== */
   if (interaction.isButton()) {
 
-    /* TICKETS */
+    /* VERIFY BUTTONS */
+    if (interaction.customId.startsWith('verify_')) {
+      const [, action, id] = interaction.customId.split('_');
+      const data = verifyRequests.get(id);
+      if (!data) return interaction.reply({ embeds: [errorEmbed('Verification expired')], ephemeral: true });
+
+      const channel = await client.channels.fetch(data.channelId);
+
+      if (action === 'yes') {
+        await channel.send({
+          embeds: [
+            new EmbedBuilder()
+              .setColor(0x57F287)
+              .setTitle('✅ Delivery Confirmed')
+              .setDescription(`User ${interaction.user} successfully confirmed delivery.`)
+              .setImage(data.imageUrl)
+          ]
+        });
+      } else {
+        await channel.send({
+          embeds: [
+            new EmbedBuilder()
+              .setColor(0xED4245)
+              .setTitle('❌ Delivery Rejected')
+              .setDescription(`User ${interaction.user} rejected the delivery.`)
+          ]
+        });
+      }
+
+      verifyRequests.delete(id);
+      return interaction.reply({ embeds: [okEmbed('Response sent.')], ephemeral: true });
+    }
+
+    /* TICKET BUTTONS */
     if (interaction.customId.startsWith('ticket_')) {
       const cfg = guildConfig.get(interaction.guild.id);
       if (!cfg) return interaction.reply({ embeds: [errorEmbed('System not setup')], ephemeral: true });
@@ -276,45 +398,9 @@ client.on('interactionCreate', async interaction => {
       return interaction.reply({ embeds: [okEmbed(`Ticket created: ${ch}`)], ephemeral: true });
     }
 
-    /* CLOSE TICKET */
     if (interaction.customId === 'close_ticket') {
       await interaction.reply({ embeds: [okEmbed('Closing ticket...')] });
       setTimeout(() => interaction.channel.delete().catch(() => {}), 5000);
-    }
-
-    /* VERIFY BUTTONS */
-    if (interaction.customId.startsWith('verify_')) {
-      const [, action, id] = interaction.customId.split('_');
-      const data = verifyRequests.get(id);
-      if (!data) return interaction.reply({ embeds: [errorEmbed('Request expired')], ephemeral: true });
-
-      const channel = await client.channels.fetch(data.channelId);
-
-      if (action === 'yes') {
-        await channel.send({
-          embeds: [
-            new EmbedBuilder()
-              .setColor(0x57F287)
-              .setTitle('✅ Delivery Confirmed')
-              .setDescription(`User ${interaction.user} successfully confirmed the digital product was delivered.`)
-              .setImage(data.imageUrl)
-          ]
-        });
-      }
-
-      if (action === 'no') {
-        await channel.send({
-          embeds: [
-            new EmbedBuilder()
-              .setColor(0xED4245)
-              .setTitle('❌ Delivery Rejected')
-              .setDescription(`User ${interaction.user} rejected the delivery.`)
-          ]
-        });
-      }
-
-      verifyRequests.delete(id);
-      return interaction.reply({ embeds: [okEmbed('Response sent.')], ephemeral: true });
     }
   }
 });
