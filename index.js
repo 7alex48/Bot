@@ -1,835 +1,348 @@
-console.log('TOKEN:', !!process.env.DISCORD_TOKEN);
-const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder,
+console.log('TOKEN LOADED:', !!process.env.DISCORD_TOKEN);
+
+const {
+  Client,
+  GatewayIntentBits,
+  Partials,
+  EmbedBuilder,
+  ActionRowBuilder,
   ButtonBuilder,
-  ButtonStyle,   SlashCommandBuilder,
-  PermissionFlagsBits} = require('discord.js');
+  ButtonStyle,
+  SlashCommandBuilder,
+  PermissionFlagsBits,
+  ChannelType
+} = require('discord.js');
 
-const ADMIN_ROLE_ID = '1448769935642853376';
-const OWNER_ID = '1254537544322912256'; // VÁŠ ID: Len tento užívateľ môže použiť /say
-const PREFIX = '!';
-const COLOR = 0x5865F2; // Discord blurple
+// ================= CONFIG =================
+const OWNER_ID = '1254537544322912256'; // bot owner
+const COLOR = 0x5865F2;
+const TICKET_CATEGORY_NAME = '🎫 Tickets';
 
+// ================= CLIENT =================
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent,
     GatewayIntentBits.DirectMessages
-  ]
+  ],
+  partials: [Partials.Channel]
 });
 
-// ========== HELP EMBED ==========
-const helpEmbed = () =>
-  new EmbedBuilder()
-    .setTitle('📘 Admin príkazy')
-    .setColor(COLOR)
-    .setDescription(
-      `
-**!warn @user dôvod**
-⚠️ Varovanie
+// ===== In-memory guild config =====
+const guildConfig = new Map(); 
+// guildId -> { supportRoleId, ticketCategoryId }
 
-**!kick @user dôvod**
-👢 Kick
+// ================= HELPERS =================
+const errorEmbed = msg =>
+  new EmbedBuilder().setColor(0xED4245).setDescription(`❌ ${msg}`);
 
-**!ban @user dôvod**
-🔨 Ban
+const successEmbed = msg =>
+  new EmbedBuilder().setColor(0x57F287).setDescription(`✅ ${msg}`);
 
-**!clear počet**
-🧹 Vymazanie správ
+async function ensureTicketCategory(guild) {
+  let category = guild.channels.cache.find(
+    c => c.type === ChannelType.GuildCategory && c.name === TICKET_CATEGORY_NAME
+  );
 
-**!say text**
-🗣️ Bot pošle správu
-
-**!userinfo @user**
-👤 Informácie o userovi
-`
-    );
-
-// ========== MAIN CHAT COMMANDS (!-commands) ==========
-client.on('messageCreate', async message => {
-  if (message.author.bot) return;
-  if (!message.content.startsWith(PREFIX)) return;
-
-  const args = message.content.slice(PREFIX.length).trim().split(/ +/);
-  const command = args.shift()?.toLowerCase();
-  const isAdmin = message.member?.roles.cache.has(ADMIN_ROLE_ID);
-
-  // ===== HELP =====
-  if (command === 'help') {
-    return message.reply({ embeds: [helpEmbed()] });
-  }
-
-  const adminCommands = ['warn', 'kick', 'ban', 'clear', 'say'];
-  if (adminCommands.includes(command) && !isAdmin) {
-    return message.reply({
-      embeds: [
-        new EmbedBuilder()
-          .setColor(0xED4245)
-          .setDescription('❌ Nemáš oprávnenie použiť tento príkaz.')
-      ]
+  if (!category) {
+    category = await guild.channels.create({
+      name: TICKET_CATEGORY_NAME,
+      type: ChannelType.GuildCategory
     });
   }
 
-  // ===== WARN =====
-  if (command === 'warn') {
-    const target = message.mentions.members.first();
-    if (!target)
-      return message.reply({
-        embeds: [
-          new EmbedBuilder()
-            .setColor(0xFAA61A)
-            .setDescription('Použitie: `!warn @user dôvod`')
-        ]
+  return category;
+}
+
+function cleanName(name) {
+  return name.toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 80);
+}
+
+async function userHasTicket(guild, userId) {
+  return guild.channels.cache.find(
+    c =>
+      c.type === ChannelType.GuildText &&
+      c.parent?.name === TICKET_CATEGORY_NAME &&
+      c.topic?.includes(`owner:${userId}`)
+  );
+}
+
+// ================= SLASH COMMANDS =================
+async function deployCommands() {
+  const commands = [
+    new SlashCommandBuilder()
+      .setName('setup')
+      .setDescription('Setup the ticket system')
+      .addChannelOption(o =>
+        o.setName('channel')
+          .setDescription('Channel for ticket panel')
+          .setRequired(true)
+          .addChannelTypes(ChannelType.GuildText)
+      )
+      .addRoleOption(o =>
+        o.setName('support')
+          .setDescription('Support role')
+          .setRequired(true)
+      )
+      .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+
+    new SlashCommandBuilder()
+      .setName('warn')
+      .setDescription('Warn a user')
+      .addUserOption(o =>
+        o.setName('user').setDescription('User').setRequired(true)
+      )
+      .addStringOption(o =>
+        o.setName('reason').setDescription('Reason').setRequired(false)
+      )
+      .setDefaultMemberPermissions(PermissionFlagsBits.KickMembers),
+
+    new SlashCommandBuilder()
+      .setName('kick')
+      .setDescription('Kick a user')
+      .addUserOption(o =>
+        o.setName('user').setDescription('User').setRequired(true)
+      )
+      .addStringOption(o =>
+        o.setName('reason').setDescription('Reason').setRequired(false)
+      )
+      .setDefaultMemberPermissions(PermissionFlagsBits.KickMembers),
+
+    new SlashCommandBuilder()
+      .setName('ban')
+      .setDescription('Ban a user')
+      .addUserOption(o =>
+        o.setName('user').setDescription('User').setRequired(true)
+      )
+      .addStringOption(o =>
+        o.setName('reason').setDescription('Reason').setRequired(false)
+      )
+      .setDefaultMemberPermissions(PermissionFlagsBits.BanMembers),
+
+    new SlashCommandBuilder()
+      .setName('clear')
+      .setDescription('Clear messages')
+      .addIntegerOption(o =>
+        o.setName('amount')
+          .setDescription('1-100')
+          .setRequired(true)
+          .setMinValue(1)
+          .setMaxValue(100)
+      )
+      .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages),
+
+    new SlashCommandBuilder()
+      .setName('userinfo')
+      .setDescription('User information')
+      .addUserOption(o =>
+        o.setName('user').setDescription('User').setRequired(false)
+      ),
+
+    new SlashCommandBuilder()
+      .setName('say')
+      .setDescription('Send message as bot (owner only)')
+      .addStringOption(o =>
+        o.setName('text').setDescription('Text').setRequired(true)
+      )
+  ];
+
+  await client.application.commands.set(commands);
+}
+
+// ================= INTERACTIONS =================
+client.on('interactionCreate', async interaction => {
+  // ===== SLASH COMMANDS =====
+  if (interaction.isChatInputCommand()) {
+    const { commandName } = interaction;
+
+    // ===== SETUP =====
+    if (commandName === 'setup') {
+      const channel = interaction.options.getChannel('channel');
+      const supportRole = interaction.options.getRole('support');
+
+      const category = await ensureTicketCategory(interaction.guild);
+
+      guildConfig.set(interaction.guild.id, {
+        supportRoleId: supportRole.id,
+        ticketCategoryId: category.id
       });
 
-    const reason = args.slice(1).join(' ') || 'Bez dôvodu';
+      const embed = new EmbedBuilder()
+        .setTitle('🎫 Support Tickets')
+        .setColor(COLOR)
+        .setDescription(
+          'Click the button below to create a support ticket.\n\n' +
+          '🔒 Only you and the support team can see it.'
+        );
 
-    const dmEmbed = new EmbedBuilder()
-      .setTitle('⚠️ Varovanie')
-      .setColor(0xFAA61A)
-      .setDescription(
-        `Dostal si varovanie na serveri **${message.guild.name}**\n\n**Dôvod:** ${reason}`
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId('create_ticket')
+          .setLabel('🎫 Create Ticket')
+          .setStyle(ButtonStyle.Primary)
       );
 
-    try {
-      await target.send({ embeds: [dmEmbed] });
-    } catch {}
+      await channel.send({ embeds: [embed], components: [row] });
 
-    return message.channel.send({
-      embeds: [
-        new EmbedBuilder()
-          .setColor(0xFAA61A)
-          .setDescription(`⚠️ **${target.user.tag}** bol varovaný.\n**Dôvod:** ${reason}`)
-      ]
-    });
-  }
-
-  // ===== KICK =====
-  if (command === 'kick') {
-    const target = message.mentions.members.first();
-    if (!target)
-      return message.reply({
-        embeds: [
-          new EmbedBuilder()
-            .setColor(0xED4245)
-            .setDescription('Použitie: `!kick @user dôvod`')
-        ]
-      });
-
-    const reason = args.slice(1).join(' ') || 'Bez dôvodu';
-
-    try {
-      await target.send({
-        embeds: [
-          new EmbedBuilder()
-            .setTitle('👢 Kick')
-            .setColor(0xED4245)
-            .setDescription(
-              `Bol si kicknutý zo servera **${message.guild.name}**\n\n**Dôvod:** ${reason}`
-            )
-        ]
-      });
-    } catch {}
-
-    await target.kick(reason);
-
-    return message.channel.send({
-      embeds: [
-        new EmbedBuilder()
-          .setColor(0xED4245)
-          .setDescription(`👢 **${target.user.tag}** bol kicknutý.\n**Dôvod:** ${reason}`)
-      ]
-    });
-  }
-
-  // ===== BAN =====
-  if (command === 'ban') {
-    const target = message.mentions.members.first();
-    if (!target)
-      return message.reply({
-        embeds: [
-          new EmbedBuilder()
-            .setColor(0xED4245)
-            .setDescription('Použitie: `!ban @user dôvod`')
-        ]
-      });
-
-    const reason = args.slice(1).join(' ') || 'Bez dôvodu';
-
-    try {
-      await target.send({
-        embeds: [
-          new EmbedBuilder()
-            .setTitle('🔨 Ban')
-            .setColor(0xED4245)
-            .setDescription(
-              `Bol si zabanovaný na serveri **${message.guild.name}**\n\n**Dôvod:** ${reason}`
-            )
-        ]
-      });
-    } catch {}
-
-    await target.ban({ reason });
-
-    return message.channel.send({
-      embeds: [
-        new EmbedBuilder()
-          .setColor(0xED4245)
-          .setDescription(`🔨 **${target.user.tag}** bol zabanovaný.\n**Dôvod:** ${reason}`)
-      ]
-    });
-  }
-
-  // ===== CLEAR =====
-  if (command === 'clear') {
-    const amount = parseInt(args[0]);
-    if (!amount || amount < 1 || amount > 100)
-      return message.reply({
-        embeds: [
-          new EmbedBuilder()
-            .setColor(0xFAA61A)
-            .setDescription('Použitie: `!clear 1-100`')
-        ]
-      });
-
-    await message.channel.bulkDelete(amount, true);
-
-    return message.channel
-      .send({
-        embeds: [
-          new EmbedBuilder()
-            .setColor(0x57F287)
-            .setDescription(`🧹 Vymazané správy: **${amount}**`)
-        ]
-      })
-      .then(m => setTimeout(() => m.delete(), 3000));
-  }
-
-  // ===== SAY (for chat commands) =====
-  if (command === 'say') {
-    const text = args.join(' ');
-    if (!text)
-      return message.reply({
-        embeds: [
-          new EmbedBuilder()
-            .setColor(0xFAA61A)
-            .setDescription('Použitie: `!say text`')
-        ]
-      });
-
-    await message.delete();
-    return message.channel.send({
-      embeds: [
-        new EmbedBuilder().setColor(COLOR).setDescription(text)
-      ]
-    });
-  }
-
-  // ===== USERINFO =====
-  if (command === 'userinfo') {
-    const user = message.mentions.members.first() || message.member;
-
-    return message.channel.send({
-      embeds: [
-        new EmbedBuilder()
-          .setTitle('👤 User info')
-          .setColor(COLOR)
-          .addFields(
-            { name: 'Tag', value: user.user.tag, inline: true },
-            { name: 'ID', value: user.id, inline: true },
-            {
-              name: 'Joined',
-              value: `<t:${Math.floor(user.joinedTimestamp / 1000)}:R>`,
-              inline: true
-            }
-          )
-      ]
-    });
-  }
-
-
-if (command === 'rate') {
-  const target = message.mentions.members.first() || message.member;
-
-  const percent = Math.floor(Math.random() * 101);
-
-  let verdict = "sprosty kokot";
-  if (percent > 80) verdict = 'no da sa';
-  else if (percent > 60) verdict = 'mas v tej hlave nieco';
-  else if (percent > 40) verdict = 'uz v tej hlave skoro nemas nic';
-  else if (percent > 20) verdict = 'vygumovany kar';
-  else verdict = 'ty si pekne v piči';
-
-  return message.channel.send({
-    embeds: [
-      new EmbedBuilder()
-        .setTitle(' Hodnotenie')
-        .setColor(COLOR)
-        .setDescription(
-          `👤 **${target.user.tag}**\n\n` +
-          ` Skóre: **${percent} %**\n` +
-          ` Verdikt: *${verdict}*`
-        )
-        .setFooter({ text: 'Vážna Vec' })
-    ]
-  });
-}
-
-if (command === 'meme') {
-  try {
-    const res = await fetch('https://meme-api.com/gimme');
-    const data = await res.json();
-
-    const memeEmbed = new EmbedBuilder()
-      .setTitle(data.title || 'Random Meme')
-      .setColor(COLOR)
-      .setImage(data.url)
-      .setFooter({
-        text: ` ${data.ups || 0} | r/${data.subreddit || 'memes'}`
-      });
-
-    return message.channel.send({ embeds: [memeEmbed] });
-  } catch (err) {
-    return message.channel.send({
-      embeds: [
-        new EmbedBuilder()
-          .setColor(0xED4245)
-          .setDescription('failed')
-      ]
-    });
-  }
-}
-  
-if (command === 'roblox') {
-  const username = args[0];
-  if (!username) {
-    return message.reply({
-      embeds: [
-        new EmbedBuilder()
-          .setColor(0xED4245)
-          .setDescription('❌ Použitie: `!roblox username`')
-      ]
-    });
-  }
-
-  try {
-    // 1️⃣ USER INFO
-    const userRes = await fetch('https://users.roblox.com/v1/usernames/users', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        usernames: [username],
-        excludeBannedUsers: false
-      })
-    });
-
-    const userData = await userRes.json();
-    if (!userData.data?.length) {
-      return message.channel.send({
-        embeds: [
-          new EmbedBuilder()
-            .setColor(0xED4245)
-            .setDescription('❌ Roblox user nebol nájdený.')
-        ]
+      return interaction.reply({
+        embeds: [successEmbed('Ticket system has been set up.')],
+        ephemeral: true
       });
     }
 
-    const user = userData.data[0];
-
-    // 2️⃣ AVATAR
-    const avatarRes = await fetch(
-      `https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${user.id}&size=420x420&format=Png`
-    );
-    const avatarData = await avatarRes.json();
-    const avatarUrl = avatarData.data[0]?.imageUrl;
-
-    // 3️⃣ OUTFIT (full body)
-    const outfitRes = await fetch(
-      `https://thumbnails.roblox.com/v1/users/avatar?userIds=${user.id}&size=720x720&format=Png`
-    );
-    const outfitData = await outfitRes.json();
-    const outfitUrl = outfitData.data[0]?.imageUrl;
-
-    // 4️⃣ STATUS
-    const statusRes = await fetch(
-      `https://presence.roblox.com/v1/presence/users`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userIds: [user.id] })
-      }
-    );
-    const statusData = await statusRes.json();
-    const presence = statusData.userPresences?.[0];
-
-    let statusText = '⚫ Offline';
-    if (presence?.userPresenceType === 1) statusText = '🟢 Online';
-    if (presence?.userPresenceType === 2)
-      statusText = `🎮 In Game (${presence.lastLocation || 'Roblox'})`;
-
-    // 5️⃣ FRIENDS / FOLLOWERS
-    const friendsRes = await fetch(
-      `https://friends.roblox.com/v1/users/${user.id}/friends/count`
-    );
-    const followersRes = await fetch(
-      `https://friends.roblox.com/v1/users/${user.id}/followers/count`
-    );
-
-    const friends = (await friendsRes.json()).count;
-    const followers = (await followersRes.json()).count;
-
-    // 6️⃣ EMBED
-    const embed = new EmbedBuilder()
-      .setTitle(`🎮 Roblox profil – ${user.name}`)
-      .setColor(0x00A2FF)
-      .setThumbnail(avatarUrl)
-      .setImage(outfitUrl)
-      .addFields(
-        { name: '👤 Username', value: user.name, inline: true },
-        { name: '🆔 User ID', value: String(user.id), inline: true },
-        {
-          name: '📅 Created',
-          value: `<t:${Math.floor(new Date(user.created).getTime() / 1000)}:R>`,
-          inline: true
-        },
-        { name: '📡 Status', value: statusText, inline: true },
-        { name: '👥 Friends', value: String(friends), inline: true },
-        { name: '⭐ Followers', value: String(followers), inline: true }
-      )
-      .setFooter({ text: 'Roblox API • bestpro bot' });
-
-    // 7️⃣ BUTTONS
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setLabel('🔗 Open Profile')
-        .setStyle(ButtonStyle.Link)
-        .setURL(`https://www.roblox.com/users/${user.id}/profile`),
-
-      new ButtonBuilder()
-        .setLabel('🧢 Inventory')
-        .setStyle(ButtonStyle.Link)
-        .setURL(`https://www.roblox.com/users/${user.id}/inventory`),
-
-      new ButtonBuilder()
-        .setLabel('🎽 Outfit')
-        .setStyle(ButtonStyle.Link)
-        .setURL(`https://www.roblox.com/users/${user.id}/avatar`)
-    );
-
-    return message.channel.send({
-      embeds: [embed],
-      components: [row]
-    });
-
-  } catch (err) {
-    return message.channel.send({
-      embeds: [
-        new EmbedBuilder()
-          .setColor(0xED4245)
-          .setDescription('❌ Chyba pri načítaní Roblox dát.')
-      ]
-    });
-  }
-}
-  // ===== AVATAR =====
-if (command === 'avatar') {
-  const target = message.mentions.users.first() || message.author;
-
-  const avatarUrl = target.displayAvatarURL({
-    size: 1024,
-    extension: 'png',
-    forceStatic: false
-  });
-
-  return message.channel.send({
-    embeds: [
-      new EmbedBuilder()
-        .setTitle(`🖼️ Avatar – ${target.tag}`)
-        .setColor(COLOR)
-        .setImage(avatarUrl)
-      
-    ]
-  });
-}
-
-// ===== KURACIE STEHNÁ =====
-if (command === 'kuraciestehna') {
-  return message.channel.send({
-    embeds: [
-      new EmbedBuilder()
-        .setTitle('🍗 Kuracie stehná – jednoduchý recept')
-        .setColor(COLOR)
-        .setDescription(
-          `**📝 Ingrediencie:**\n` +
-          `• Kuracie stehná\n` +
-          `• Soľ, čierne korenie\n` +
-          `• Sladká paprika\n` +
-          `• Cesnak (2–3 strúčiky)\n` +
-          `• Olej alebo maslo\n\n` +
-          `**👨‍🍳 Postup:**\n` +
-          `1️⃣ Stehná umy a osuši\n` +
-          `2️⃣ Osoľ, okoreň, posyp paprikou a potri cesnakom\n` +
-          `3️⃣ Polej olejom / pridaj maslo\n` +
-          `4️⃣ Peč na **200 °C cca 45–50 minút**\n` +
-          `5️⃣ Počas pečenia občas podlej výpekom\n\n` +
-          `**🔥 Tip:**\n` +
-          `Na chrumkavú kožu zvýš posledných 5 minút na **220 °C**`
-        )
-        .setFooter({ text: 'Dobrú chuť 😋 | bestpro bot' })
-    ]
-  });
-}
-
-  if (command === 'recept') {
-  const query = args.join(' ');
-  if (!query) {
-    return message.reply({
-      embeds: [
-        new EmbedBuilder()
-          .setColor(0xED4245)
-          .setDescription('❌ Použitie: `!recept názov_jedla`')
-      ]
-    });
-  }
-
-  try {
-    // 1️⃣ Fetch recept
-    const mealRes = await fetch(
-      `https://www.themealdb.com/api/json/v1/1/search.php?s=${encodeURIComponent(query)}`
-    );
-    const mealData = await mealRes.json();
-
-    if (!mealData.meals) {
-      return message.channel.send({
-        embeds: [
-          new EmbedBuilder()
-            .setColor(0xFAA61A)
-            .setDescription(`❌ Recept **${query}** sa nenašiel.`)
-        ]
-      });
-    }
-
-    const meal = mealData.meals[0];
-
-    // 2️⃣ Ingrediencie
-    let ingredientsEN = '';
-    for (let i = 1; i <= 20; i++) {
-      const ing = meal[`strIngredient${i}`];
-      const measure = meal[`strMeasure${i}`];
-      if (ing && ing.trim()) {
-        ingredientsEN += `${ing} ${measure}\n`;
-      }
-    }
-
-    // 3️⃣ PREKLAD FUNKCIA
-    async function translate(text) {
-      const res = await fetch('https://translate.astian.org/translate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          q: text,
-          source: 'en',
-          target: 'sk',
-          format: 'text'
-        })
-      });
-      const data = await res.json();
-      return data.translatedText;
-    }
-
-    const ingredientsSK = await translate(ingredientsEN);
-    const instructionsSK = await translate(meal.strInstructions);
-
-    // 4️⃣ EMBED
-    const embed = new EmbedBuilder()
-      .setTitle(`🍽️ ${meal.strMeal} (SK)`)
-      .setColor(COLOR)
-      .setThumbnail(meal.strMealThumb)
-      .addFields(
-        {
-          name: '📝 Ingrediencie',
-          value: ingredientsSK.slice(0, 1024)
-        },
-        {
-          name: '👨‍🍳 Postup',
-          value: instructionsSK.slice(0, 1024)
-        }
-      )
-      .setFooter({ text: 'Automatický preklad • bestpro bot' });
-
-    return message.channel.send({ embeds: [embed] });
-
-  } catch (err) {
-    return message.channel.send({
-      embeds: [
-        new EmbedBuilder()
-          .setColor(0xED4245)
-          .setDescription('❌ Chyba pri načítaní receptu.')
-      ]
-    });
-  }
-}
-  if (command === 'nsfwlink') {
-  // kontrola NSFW channelu
-  if (!message.channel.nsfw) {
-    return message.reply({
-      embeds: [
-        new EmbedBuilder()
-          .setColor(0xED4245)
-          .setDescription('🔞 Tento príkaz je povolený iba v NSFW kanáloch.')
-      ]
-    });
-  }
-
-  // zoznam linkov (môžeš si zmeniť / doplniť)
-  const links = [
-    'https://www.reddit.com/r/nsfw/',
-    'https://www.reddit.com/r/gonewild/',
-    'https://www.reddit.com/r/realgirls/',
-    'https://www.reddit.com/r/nsfwcosplay/',
-    'https://www.reddit.com/r/nsfw_gifs/'
-  ];
-
-  const randomLink = links[Math.floor(Math.random() * links.length)];
-
-  return message.channel.send({
-    embeds: [
-      new EmbedBuilder()
-        .setTitle('🔞 NSFW odkaz')
-        .setColor(0xED4245)
-        .setDescription(
-          `⚠️ **Obsah je určený len pre dospelých (18+)**\n\n` +
-          `👉 ${randomLink}`
-        )
-        .setFooter({ text: 'Bot neposkytuje obsah, iba odkaz' })
-    ]
-  });
-}
-  
-
-// ======================================================================
-// ===== NSFW REDDIT (OPRAVENÝ BLOK) =====
-// ======================================================================
-if (command === 'nsfwreddit') {
-
-  // 1. Kontrola NSFW kanálu
-  if (!message.channel.nsfw) {
-    return message.reply({
-      embeds: [
-        new EmbedBuilder()
-          .setColor(0xED4245)
-          .setDescription('🔞 Tento príkaz je povolený iba v NSFW kanáloch.')
-      ]
-    });
-  }
-
-  // Zoznam subreditov (tu je jeden pridaný oproti tvojej verzii)
-  const subreddits = [
-    'nsfw', 'gonewild', 'realgirls', 'nsfwcosplay', 'Amateur' 
-  ];
-  
-  // Zvolenie náhodného subredditu
-  const randomSubreddit = subreddits[Math.floor(Math.random() * subreddits.length)];
-  
-  // JSON endpoint: Získanie "hot" postov, 50 pre dostatočný výber
-  const redditAPI = `https://www.reddit.com/r/${randomSubreddit}/hot.json?limit=50`;
-
-  // Najprv pošleme správu o načítavaní
-  const loadingMessage = await message.channel.send({
-      embeds: [
-          new EmbedBuilder()
-              .setDescription(`⏳ Načítavam NSFW post z r/${randomSubreddit}...`)
-              .setColor(0xFEE75C)
-      ]
-  });
-
-  try {
-        const response = await fetch(redditAPI, {
-        headers: {
-            // POZOR: Vymeň "tvoj-username" a "v1.0" za niečo relevantné k tvojmu botovi
-            'User-Agent': 'DiscordBot:bestpro-nsfw-fetcher:v1.0 (by /u/7alex48 )'
-        }
-    });
-
-    
-    if (!response.ok) {
-        throw new Error(`Reddit API chyba, status: ${response.status}`);
-    }
-
-    const data = await response.json();
-    const posts = data.data.children;
-    
-    if (!posts || posts.length === 0) {
-        throw new Error('Nepodarilo sa nájsť žiadne posty na subreddite.');
-    }
-
-    // 2. Filtrovanie a výber obrázku
-    const imagePosts = posts.filter(post => {
-        const url = post.data.url;
-        // Kontrola, či URL končí na bežné obrázkové/gífové prípony
-        return url.endsWith('.jpg') || url.endsWith('.png') || url.endsWith('.gif') || url.endsWith('.jpeg');
-    });
-
-    if (imagePosts.length === 0) {
-        await loadingMessage.edit({
-            embeds: [
-                new EmbedBuilder()
-                    .setColor(0xFF8800)
-                    .setDescription(`❌ V aktuálnej dávke postov (**r/${randomSubreddit}**) sa nenašiel priamy obrázok. Skús znova!`)
-            ]
+    // ===== SAY =====
+    if (commandName === 'say') {
+      if (interaction.user.id !== OWNER_ID) {
+        return interaction.reply({
+          embeds: [errorEmbed('Only the bot owner can use this command.')],
+          ephemeral: true
         });
-        return;
+      }
+
+      const text = interaction.options.getString('text');
+      await interaction.channel.send({ embeds: [
+        new EmbedBuilder().setColor(COLOR).setDescription(text)
+      ]});
+
+      return interaction.reply({ embeds: [successEmbed('Message sent.')], ephemeral: true });
     }
 
-    const selectedPost = imagePosts[Math.floor(Math.random() * imagePosts.length)].data;
-    const imageUrl = selectedPost.url;
-    
-    // 3. Odoslanie Embedu
-    const embed = new EmbedBuilder()
-          .setTitle(selectedPost.title.substring(0, 256) || `🔞 NSFW Post z r/${randomSubreddit}`)
-          .setURL(`https://reddit.com${selectedPost.permalink}`)
-          .setColor(0xED4245)
-          .setDescription(`Zdieľaný obrázok z r/**${randomSubreddit}**`)
-          .setImage(imageUrl)
-          .setFooter({ text: `⬆️ ${selectedPost.score} Upvotes | Autor: u/${selectedPost.author}` });
-          
-    await loadingMessage.edit({ embeds: [embed] });
+    // ===== USERINFO =====
+    if (commandName === 'userinfo') {
+      const user = interaction.options.getUser('user') || interaction.user;
+      const member = interaction.guild.members.cache.get(user.id);
 
-  } catch (error) {
-    console.error('Chyba pri získavaní NSFW z Redditu:', error);
-    
-    // Odpoveď pri chybe
-    const errorEmbed = new EmbedBuilder()
-          .setColor(0xFF0000)
-          .setDescription(`❌ Nastala chyba pri komunikácii s Redditom: ${error.message.substring(0, 150)}`);
-          
-    // Použijeme loadingMessage, ak ešte existuje
-    await loadingMessage.edit({ embeds: [errorEmbed] });
-  }
-}
-// ======================================================================
-// KONIEC BLOKU
-// ======================================================================
-
-
-// ===== NSFW TOGGLE =====
-if (command === 'nsfw') {
-  // permission check
-  if (!message.member.permissions.has('ManageChannels')) {
-    return message.reply({
-      embeds: [
-        new EmbedBuilder()
-          .setColor(0xED4245)
-          .setDescription('❌ Nemáš oprávnenie spravovať kanály.')
-      ]
-    });
-  }
-
-  const option = args[0];
-
-  if (!['on', 'off'].includes(option)) {
-    return message.reply({
-      embeds: [
-        new EmbedBuilder()
-          .setColor(0xFAA61A)
-          .setDescription('Použitie: `!nsfw on` alebo `!nsfw off`')
-      ]
-    });
-  }
-
-  const enable = option === 'on';
-
-  try {
-    await message.channel.setNSFW(enable);
-
-    return message.channel.send({
-      embeds: [
-        new EmbedBuilder()
-          .setColor(enable ? 0xED4245 : 0x57F287)
-          .setDescription(
-            enable
-              ? '🔞 Tento kanál je teraz **NSFW**.'
-              : '✅ NSFW bolo **vypnuté** pre tento kanál.'
-          )
-      ]
-    });
-  } catch (err) {
-    return message.channel.send({
-      embeds: [
-        new EmbedBuilder()
-          .setColor(0xED4245)
-          .setDescription('❌ Nepodarilo sa zmeniť NSFW nastavenie kanála.')
-      ]
-    });
-  }
-}
-
-  
-});
-
-// ========== SLASH COMMANDS (/say) ==========
-client.on('interactionCreate', async interaction => {
-  if (!interaction.isChatInputCommand()) return;
-
-  if (interaction.commandName === 'say') {
-    // KONTROLA ID: Len OWNER_ID môže použiť tento príkaz
-    if (interaction.user.id !== OWNER_ID) {
       return interaction.reply({
         embeds: [
           new EmbedBuilder()
-            .setColor(0xED4245)
-            .setDescription('❌ Nemáš oprávnenie použiť tento príkaz. Len majiteľ bota ho môže použiť.')
-        ],
-        ephemeral: true // Len vy uvidíte túto chybovú správu
+            .setTitle('👤 User Info')
+            .setColor(COLOR)
+            .addFields(
+              { name: 'Tag', value: user.tag, inline: true },
+              { name: 'ID', value: user.id, inline: true },
+              {
+                name: 'Joined',
+                value: member?.joinedTimestamp
+                  ? `<t:${Math.floor(member.joinedTimestamp / 1000)}:R>`
+                  : 'Unknown',
+                inline: true
+              }
+            )
+        ]
       });
     }
 
-    const text = interaction.options.getString('text');
+    // ===== CLEAR =====
+    if (commandName === 'clear') {
+      const amount = interaction.options.getInteger('amount');
+      await interaction.channel.bulkDelete(amount, true);
+      return interaction.reply({
+        embeds: [successEmbed(`Deleted ${amount} messages.`)],
+        ephemeral: true
+      });
+    }
 
-    await interaction.channel.send({
-      embeds: [
-        new EmbedBuilder().setColor(COLOR).setDescription(text)
-      ]
-    });
+    // ===== WARN / KICK / BAN =====
+    if (['warn', 'kick', 'ban'].includes(commandName)) {
+      const target = interaction.options.getUser('user');
+      const reason = interaction.options.getString('reason') || 'No reason';
+      const member = await interaction.guild.members.fetch(target.id).catch(() => null);
 
-    return interaction.reply({
-      embeds: [
-        new EmbedBuilder()
-          .setColor(0x57F287)
-          .setDescription('✅ Správa bola odoslaná.')
-      ],
-      ephemeral: true
-    });
+      if (!member) {
+        return interaction.reply({ embeds: [errorEmbed('User not found.')], ephemeral: true });
+      }
+
+      try {
+        await target.send({
+          embeds: [
+            new EmbedBuilder()
+              .setColor(0xED4245)
+              .setDescription(
+                `${commandName.toUpperCase()} on **${interaction.guild.name}**\nReason: ${reason}`
+              )
+          ]
+        });
+      } catch {}
+
+      if (commandName === 'kick') await member.kick(reason);
+      if (commandName === 'ban') await member.ban({ reason });
+
+      return interaction.reply({
+        embeds: [successEmbed(`${commandName.toUpperCase()} executed on ${target.tag}`)]
+      });
+    }
+  }
+
+  // ===== BUTTONS =====
+  if (interaction.isButton()) {
+    // ===== CREATE TICKET =====
+    if (interaction.customId === 'create_ticket') {
+      const config = guildConfig.get(interaction.guild.id);
+      if (!config) {
+        return interaction.reply({ embeds: [errorEmbed('Ticket system not set up.')], ephemeral: true });
+      }
+
+      const existing = await userHasTicket(interaction.guild, interaction.user.id);
+      if (existing) {
+        return interaction.reply({
+          embeds: [errorEmbed(`You already have a ticket: ${existing}`)],
+          ephemeral: true
+        });
+      }
+
+      const channel = await interaction.guild.channels.create({
+        name: `ticket-${cleanName(interaction.user.username)}`,
+        type: ChannelType.GuildText,
+        parent: config.ticketCategoryId,
+        topic: `owner:${interaction.user.id}`,
+        permissionOverwrites: [
+          { id: interaction.guild.id, deny: ['ViewChannel'] },
+          { id: interaction.user.id, allow: ['ViewChannel', 'SendMessages', 'ReadMessageHistory'] },
+          { id: config.supportRoleId, allow: ['ViewChannel', 'SendMessages', 'ReadMessageHistory'] }
+        ]
+      });
+
+      const closeRow = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId('close_ticket')
+          .setLabel('🔒 Close Ticket')
+          .setStyle(ButtonStyle.Danger)
+      );
+
+      await channel.send({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(COLOR)
+            .setTitle('🎫 Support Ticket')
+            .setDescription('Support will be with you shortly.')
+        ],
+        components: [closeRow]
+      });
+
+      return interaction.reply({
+        embeds: [successEmbed(`Ticket created: ${channel}`)],
+        ephemeral: true
+      });
+    }
+
+    // ===== CLOSE TICKET =====
+    if (interaction.customId === 'close_ticket') {
+      await interaction.reply({
+        embeds: [successEmbed('Ticket will be closed in 5 seconds.')]
+      });
+
+      setTimeout(() => interaction.channel.delete().catch(() => {}), 5000);
+    }
   }
 });
 
-// ========== READY EVENT (Consolidated) ==========
+// ================= READY =================
 client.once('ready', async () => {
-  console.log(`✅ Prihlásený ako ${client.user.tag}`);
-
-  // Set presence
-  client.user.setPresence({
-    activities: [{ name: 'bestpro', type: 4 }],
-    status: 'online'
-  });
-
-  // Deploy Slash Commands
-  const data = [
-    new SlashCommandBuilder()
-      .setName('say')
-      .setDescription('Napíš správu cez bota')
-      .addStringOption(option =>
-        option
-          .setName('text')
-          .setDescription('Text, ktorý má bot poslať')
-          .setRequired(true)
-      )
-      // Odstránili sme setDefaultMemberPermissions, kontrola je teraz v interactionCreate
-  ];
-
-  await client.application.commands.set(data);
-  console.log('✅ Slash Commands boli nasadené.');
+  console.log(`✅ Logged in as ${client.user.tag}`);
+  await deployCommands();
+  console.log('✅ Slash commands deployed');
 });
 
+// ================= LOGIN =================
 client.login(process.env.DISCORD_TOKEN);
-
