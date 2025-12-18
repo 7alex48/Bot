@@ -17,7 +17,7 @@ const {
 const OWNER_ID = '1254537544322912256';
 const COLOR = 0x5865F2;
 const TICKET_CATEGORY_NAME = '🎫 Tickets';
-const AUTO_CLOSE_MS = 24 * 60 * 60 * 1000; // 24 hours
+const AUTO_CLOSE_MS = 24 * 60 * 60 * 1000; // 24h
 
 // ================= CLIENT =================
 const client = new Client({
@@ -31,16 +31,13 @@ const client = new Client({
   partials: [Partials.Channel]
 });
 
-// ===== in-memory guild config =====
-const guildConfig = new Map(); 
-// guildId -> { supportRoleId, ticketCategoryId }
-
-// ===== ticket timers =====
+// ================= STORAGE =================
+const guildConfig = new Map(); // guildId -> { supportRoleId, ticketCategoryId }
 const ticketTimers = new Map(); // channelId -> timeout
 
 // ================= HELPERS =================
-const errorEmbed = m => new EmbedBuilder().setColor(0xED4245).setDescription(`❌ ${m}`);
-const okEmbed = m => new EmbedBuilder().setColor(0x57F287).setDescription(`✅ ${m}`);
+const errorEmbed = t => new EmbedBuilder().setColor(0xED4245).setDescription(`❌ ${t}`);
+const okEmbed = t => new EmbedBuilder().setColor(0x57F287).setDescription(`✅ ${t}`);
 
 function cleanName(name) {
   return name.toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 80);
@@ -87,60 +84,100 @@ function startAutoClose(channel) {
 
 // ================= SLASH COMMANDS =================
 async function deployCommands() {
-  const cmds = [
+  const commands = [
     new SlashCommandBuilder()
       .setName('setup')
       .setDescription('Setup ticket system')
       .addChannelOption(o =>
-        o.setName('channel').setDescription('Ticket panel channel').setRequired(true)
+        o.setName('channel')
+          .setDescription('Channel for ticket panel')
+          .setRequired(true)
           .addChannelTypes(ChannelType.GuildText)
       )
       .addRoleOption(o =>
-        o.setName('support').setDescription('Support role').setRequired(true)
+        o.setName('support')
+          .setDescription('Support role')
+          .setRequired(true)
       )
       .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
     new SlashCommandBuilder()
       .setName('warn')
       .setDescription('Warn a user')
-      .addUserOption(o => o.setName('user').setRequired(true))
-      .addStringOption(o => o.setName('reason'))
+      .addUserOption(o =>
+        o.setName('user')
+          .setDescription('User to warn')
+          .setRequired(true)
+      )
+      .addStringOption(o =>
+        o.setName('reason')
+          .setDescription('Reason')
+          .setRequired(false)
+      )
       .setDefaultMemberPermissions(PermissionFlagsBits.KickMembers),
 
     new SlashCommandBuilder()
       .setName('kick')
       .setDescription('Kick a user')
-      .addUserOption(o => o.setName('user').setRequired(true))
-      .addStringOption(o => o.setName('reason'))
+      .addUserOption(o =>
+        o.setName('user')
+          .setDescription('User to kick')
+          .setRequired(true)
+      )
+      .addStringOption(o =>
+        o.setName('reason')
+          .setDescription('Reason')
+          .setRequired(false)
+      )
       .setDefaultMemberPermissions(PermissionFlagsBits.KickMembers),
 
     new SlashCommandBuilder()
       .setName('ban')
       .setDescription('Ban a user')
-      .addUserOption(o => o.setName('user').setRequired(true))
-      .addStringOption(o => o.setName('reason'))
+      .addUserOption(o =>
+        o.setName('user')
+          .setDescription('User to ban')
+          .setRequired(true)
+      )
+      .addStringOption(o =>
+        o.setName('reason')
+          .setDescription('Reason')
+          .setRequired(false)
+      )
       .setDefaultMemberPermissions(PermissionFlagsBits.BanMembers),
 
     new SlashCommandBuilder()
       .setName('clear')
       .setDescription('Clear messages')
       .addIntegerOption(o =>
-        o.setName('amount').setRequired(true).setMinValue(1).setMaxValue(100)
+        o.setName('amount')
+          .setDescription('1-100 messages')
+          .setRequired(true)
+          .setMinValue(1)
+          .setMaxValue(100)
       )
       .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages),
 
     new SlashCommandBuilder()
       .setName('userinfo')
-      .setDescription('User info')
-      .addUserOption(o => o.setName('user')),
+      .setDescription('User information')
+      .addUserOption(o =>
+        o.setName('user')
+          .setDescription('Target user')
+          .setRequired(false)
+      ),
 
     new SlashCommandBuilder()
       .setName('say')
       .setDescription('Bot sends a message (owner only)')
-      .addStringOption(o => o.setName('text').setRequired(true))
+      .addStringOption(o =>
+        o.setName('text')
+          .setDescription('Text to send')
+          .setRequired(true)
+      )
   ];
 
-  await client.application.commands.set(cmds);
+  await client.application.commands.set(commands);
 }
 
 // ================= INTERACTIONS =================
@@ -148,10 +185,9 @@ client.on('interactionCreate', async interaction => {
 
   // ===== SLASH =====
   if (interaction.isChatInputCommand()) {
-    const { commandName } = interaction;
+    const cmd = interaction.commandName;
 
-    // SETUP
-    if (commandName === 'setup') {
+    if (cmd === 'setup') {
       const channel = interaction.options.getChannel('channel');
       const role = interaction.options.getRole('support');
 
@@ -166,11 +202,11 @@ client.on('interactionCreate', async interaction => {
         .setTitle('🎫 Support Center')
         .setColor(COLOR)
         .setDescription(
-          '**Need help or want to buy?**\n\n' +
-          'Choose an option below.\n' +
-          'Tickets are private and secure.'
+          '**Need help or want to buy something?**\n\n' +
+          'Choose the correct option below.\n' +
+          'Tickets are private.'
         )
-        .setFooter({ text: 'Support System' });
+        .setFooter({ text: 'Ticket System' });
 
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('ticket_buy').setLabel('💳 BUY').setStyle(ButtonStyle.Success),
@@ -178,39 +214,38 @@ client.on('interactionCreate', async interaction => {
       );
 
       await channel.send({ embeds: [embed], components: [row] });
-
       return interaction.reply({ embeds: [okEmbed('Ticket system ready.')], ephemeral: true });
     }
 
-    // ADMIN COMMANDS
-    if (['warn', 'kick', 'ban'].includes(commandName)) {
+    if (['warn', 'kick', 'ban'].includes(cmd)) {
       const user = interaction.options.getUser('user');
       const reason = interaction.options.getString('reason') || 'No reason';
       const member = await interaction.guild.members.fetch(user.id).catch(() => null);
-
       if (!member) return interaction.reply({ embeds: [errorEmbed('User not found')], ephemeral: true });
 
       try {
         await user.send({
-          embeds: [new EmbedBuilder().setColor(0xED4245).setDescription(
-            `${commandName.toUpperCase()} on **${interaction.guild.name}**\nReason: ${reason}`
-          )]
+          embeds: [
+            new EmbedBuilder()
+              .setColor(0xED4245)
+              .setDescription(`${cmd.toUpperCase()} on **${interaction.guild.name}**\nReason: ${reason}`)
+          ]
         });
       } catch {}
 
-      if (commandName === 'kick') await member.kick(reason);
-      if (commandName === 'ban') await member.ban({ reason });
+      if (cmd === 'kick') await member.kick(reason);
+      if (cmd === 'ban') await member.ban({ reason });
 
-      return interaction.reply({ embeds: [okEmbed(`${commandName} executed.`)] });
+      return interaction.reply({ embeds: [okEmbed(`${cmd.toUpperCase()} executed.`)] });
     }
 
-    if (commandName === 'clear') {
+    if (cmd === 'clear') {
       const amount = interaction.options.getInteger('amount');
       await interaction.channel.bulkDelete(amount, true);
       return interaction.reply({ embeds: [okEmbed(`Deleted ${amount} messages.`)], ephemeral: true });
     }
 
-    if (commandName === 'userinfo') {
+    if (cmd === 'userinfo') {
       const user = interaction.options.getUser('user') || interaction.user;
       const member = interaction.guild.members.cache.get(user.id);
 
@@ -234,15 +269,14 @@ client.on('interactionCreate', async interaction => {
       });
     }
 
-    if (commandName === 'say') {
+    if (cmd === 'say') {
       if (interaction.user.id !== OWNER_ID)
         return interaction.reply({ embeds: [errorEmbed('Owner only')], ephemeral: true });
 
       await interaction.channel.send({
         embeds: [new EmbedBuilder().setColor(COLOR).setDescription(interaction.options.getString('text'))]
       });
-
-      return interaction.reply({ embeds: [okEmbed('Sent')], ephemeral: true });
+      return interaction.reply({ embeds: [okEmbed('Message sent.')], ephemeral: true });
     }
   }
 
@@ -296,18 +330,15 @@ client.on('interactionCreate', async interaction => {
     }
 
     if (interaction.customId === 'close_ticket') {
-      await interaction.reply({ embeds: [okEmbed('Ticket closing...')] });
+      await interaction.reply({ embeds: [okEmbed('Closing ticket...')] });
       setTimeout(() => interaction.channel.delete().catch(() => {}), 5000);
     }
   }
 });
 
-// reset auto-close on message
+// reset auto-close timer on activity
 client.on('messageCreate', msg => {
-  if (
-    msg.channel.parent?.name === TICKET_CATEGORY_NAME &&
-    ticketTimers.has(msg.channel.id)
-  ) {
+  if (msg.channel.parent?.name === TICKET_CATEGORY_NAME && ticketTimers.has(msg.channel.id)) {
     startAutoClose(msg.channel);
   }
 });
@@ -316,7 +347,7 @@ client.on('messageCreate', msg => {
 client.once('ready', async () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
   await deployCommands();
-  console.log('✅ Commands deployed');
+  console.log('✅ Slash commands deployed');
 });
 
 // ================= LOGIN =================
