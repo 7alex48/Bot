@@ -1,4 +1,6 @@
 console.log('TOKEN LOADED:', !!process.env.DISCORD_TOKEN);
+console.log('🟢 index.js started');
+const { initDB } = require('./database');
 
 const {
   Client,
@@ -414,6 +416,10 @@ client.on('messageCreate', msg => {
 
 /* ================= READY ================= */
 client.once('ready', async () => {
+  console.log('🟢 ready event fired');
+
+  await initDB(); // 🔥 TOTO TAM CHÝBALO
+
   console.log(`✅ Logged in as ${client.user.tag}`);
   await deployCommands();
   console.log('✅ Slash commands deployed');
