@@ -426,4 +426,11 @@ client.once('ready', async () => {
 });
 
 /* ================= LOGIN ================= */
-client.login(process.env.DISCORD_TOKEN);
+client.login(process.env.DISCORD_TOKEN)
+  .then(() => {
+    console.log('🟢 Discord login OK');
+  })
+  .catch(err => {
+    console.error('❌ Discord login FAILED:', err);
+    process.exit(1);
+  });
