@@ -1,6 +1,17 @@
 console.log('TOKEN LOADED:', !!process.env.DISCORD_TOKEN);
 console.log('🟢 index.js started');
+
 const { initDB } = require('./database');
+const {
+  upsertUser,
+  addWarn,
+  addAction,
+  getUserProfile,
+  getUserHistory,
+  ticketCreate,
+  ticketClose,
+  ticketFindOpenByChannel
+} = require('./dbHelpers');
 
 const {
   Client,
@@ -17,9 +28,23 @@ const {
 
 /* ================= CONFIG ================= */
 const OWNER_ID = '1254537544322912256';
+const SUPPORT_ROLE_ID = '1433531157940797551';
+const ADMIN_ROLE_ID = '1451651879950876702';
+
 const COLOR = 0x5865F2;
 const TICKET_CATEGORY_NAME = '🎫 Tickets';
 const AUTO_CLOSE_MS = 24 * 60 * 60 * 1000;
+
+/* ================= ROLE CHECKS ================= */
+function isSupport(member) {
+  return !!member?.roles?.cache?.has(SUPPORT_ROLE_ID);
+}
+function isAdmin(member) {
+  return !!member?.roles?.cache?.has(ADMIN_ROLE_ID);
+}
+function isAdminOrSupport(member) {
+  return isAdmin(member) || isSupport(member) || member?.id === OWNER_ID;
+}
 
 /* ================= CLIENT ================= */
 const client = new Client({
@@ -34,7 +59,7 @@ const client = new Client({
 });
 
 /* ================= STORAGE ================= */
-const guildConfig = new Map();
+const guildConfig = new Map();     // ostáva (setup po reštarte zanikne - môžeme neskôr uložiť do DB)
 const ticketTimers = new Map();
 const verifyRequests = new Map();
 
@@ -71,10 +96,14 @@ async function userHasTicket(guild, userId) {
 function startAutoClose(channel) {
   if (ticketTimers.has(channel.id)) clearTimeout(ticketTimers.get(channel.id));
   const timer = setTimeout(async () => {
+    console.log(`⏰ Auto-close firing for channel ${channel.id}`);
     await channel.send({
       embeds: [new EmbedBuilder().setColor(0xED4245).setDescription('⏰ Ticket closed due to inactivity.')]
     });
     setTimeout(() => channel.delete().catch(() => {}), 5000);
+
+    // DB: zatvor ticket podľa channel_id (ak existuje)
+    ticketClose(channel.id, 'auto-close').catch(e => console.error('❌ ticketClose(auto) failed:', e));
   }, AUTO_CLOSE_MS);
   ticketTimers.set(channel.id, timer);
 }
@@ -174,7 +203,7 @@ async function deployCommands() {
 
     new SlashCommandBuilder()
       .setName('userinfo')
-      .setDescription('User info')
+      .setDescription('User info (DB + guild)')
       .addUserOption(o =>
         o.setName('user')
           .setDescription('Target user')
@@ -200,8 +229,12 @@ client.on('interactionCreate', async interaction => {
   if (interaction.isChatInputCommand()) {
     const cmd = interaction.commandName;
 
-    /* SETUP */
+    /* SETUP (admin only by default perms, but we also guard by role id) */
     if (cmd === 'setup') {
+      if (!isAdmin(interaction.member)) {
+        return interaction.reply({ embeds: [errorEmbed('Admin only')], ephemeral: true });
+      }
+
       const channel = interaction.options.getChannel('channel');
       const role = interaction.options.getRole('support');
       const cat = await ensureTicketCategory(interaction.guild);
@@ -210,6 +243,8 @@ client.on('interactionCreate', async interaction => {
         supportRoleId: role.id,
         ticketCategoryId: cat.id
       });
+
+      console.log(`✅ Setup saved in memory for guild ${interaction.guild.id} supportRoleId=${role.id}`);
 
       const embed = new EmbedBuilder()
         .setColor(COLOR)
@@ -225,11 +260,18 @@ client.on('interactionCreate', async interaction => {
       return interaction.reply({ embeds: [okEmbed('Ticket system ready.')], ephemeral: true });
     }
 
-    /* VERIFY */
+    /* VERIFY (support or admin) */
     if (cmd === 'verify') {
+      if (!isAdminOrSupport(interaction.member)) {
+        return interaction.reply({ embeds: [errorEmbed('Support/Admin only')], ephemeral: true });
+      }
+
       const target = interaction.options.getUser('user');
       const message = interaction.options.getString('message');
       const proof = interaction.options.getAttachment('proof');
+
+      await upsertUser(target).catch(() => {});
+      await upsertUser(interaction.user).catch(() => {});
 
       if (!proof.contentType?.startsWith('image/')) {
         return interaction.reply({ embeds: [errorEmbed('Proof must be an image.')], ephemeral: true });
@@ -265,51 +307,105 @@ client.on('interactionCreate', async interaction => {
             .setImage(proof.url)
         ],
         components: [row]
+      }).catch(err => {
+        console.error('❌ Failed to DM user for verify:', err?.message || err);
       });
     }
 
-    /* ADMIN COMMANDS */
+    /* ADMIN COMMANDS (warn/kick/ban) + DB */
     if (['warn', 'kick', 'ban'].includes(cmd)) {
+      if (!isAdminOrSupport(interaction.member)) {
+        return interaction.reply({ embeds: [errorEmbed('Support/Admin only')], ephemeral: true });
+      }
+
       const user = interaction.options.getUser('user');
       const reason = interaction.options.getString('reason') || 'No reason';
+
+      await upsertUser(user).catch(() => {});
+      await upsertUser(interaction.user).catch(() => {});
+
       const member = await interaction.guild.members.fetch(user.id).catch(() => null);
-      if (!member) return interaction.reply({ embeds: [errorEmbed('User not found')], ephemeral: true });
 
-      if (cmd === 'kick') await member.kick(reason);
-      if (cmd === 'ban') await member.ban({ reason });
+      if (cmd === 'warn') {
+        await addWarn(user.id, interaction.user.id, reason);
+        console.log(`⚠️ WARN saved user=${user.id} mod=${interaction.user.id} reason="${reason}"`);
+        return interaction.reply({ embeds: [okEmbed(`WARN added for ${user.tag}`)] });
+      }
 
-      return interaction.reply({ embeds: [okEmbed(`${cmd.toUpperCase()} executed.`)] });
+      if (cmd === 'kick') {
+        if (member) await member.kick(reason);
+        await addAction(user.id, interaction.user.id, 'kick', reason);
+        console.log(`👢 KICK saved user=${user.id} mod=${interaction.user.id} reason="${reason}"`);
+        return interaction.reply({ embeds: [okEmbed(`KICK executed for ${user.tag}`)] });
+      }
+
+      if (cmd === 'ban') {
+        // ban aj keď member nie je v guilde
+        await interaction.guild.members.ban(user.id, { reason }).catch(() => {});
+        await addAction(user.id, interaction.user.id, 'ban', reason);
+        console.log(`🔨 BAN saved user=${user.id} mod=${interaction.user.id} reason="${reason}"`);
+        return interaction.reply({ embeds: [okEmbed(`BAN executed for ${user.tag}`)] });
+      }
     }
 
+    /* CLEAR (discord perms necháme tak ako si mal) */
     if (cmd === 'clear') {
       const amount = interaction.options.getInteger('amount');
       await interaction.channel.bulkDelete(amount, true);
       return interaction.reply({ embeds: [okEmbed(`Deleted ${amount} messages.`)], ephemeral: true });
     }
 
+    /* USERINFO (support/admin) – pridá DB info aj keď user nie je member */
     if (cmd === 'userinfo') {
+      if (!isAdminOrSupport(interaction.member)) {
+        return interaction.reply({ embeds: [errorEmbed('Support/Admin only')], ephemeral: true });
+      }
+
       const user = interaction.options.getUser('user') || interaction.user;
-      const member = interaction.guild.members.cache.get(user.id);
-      return interaction.reply({
-        embeds: [
-          new EmbedBuilder()
-            .setColor(COLOR)
-            .setTitle('👤 User Info')
-            .addFields(
-              { name: 'Tag', value: user.tag, inline: true },
-              { name: 'ID', value: user.id, inline: true },
-              {
-                name: 'Joined',
-                value: member?.joinedTimestamp
-                  ? `<t:${Math.floor(member.joinedTimestamp / 1000)}:R>`
-                  : 'Unknown',
-                inline: true
-              }
-            )
-        ]
-      });
+      const member = interaction.guild.members.cache.get(user.id) || null;
+
+      await upsertUser(user).catch(() => {});
+
+      const profile = await getUserProfile(user.id);
+      const history = await getUserHistory(user.id);
+
+      const actionsText =
+        history.actions.length === 0
+          ? 'None'
+          : history.actions
+              .slice(0, 5)
+              .map(a => `• **${a.action.toUpperCase()}** — ${a.reason || 'No reason'} (<t:${Math.floor(new Date(a.created_at).getTime()/1000)}:R>)`)
+              .join('\n');
+
+      const embed = new EmbedBuilder()
+        .setColor(COLOR)
+        .setTitle('👤 User Info')
+        .addFields(
+          { name: 'Tag', value: user.tag, inline: true },
+          { name: 'ID', value: user.id, inline: true },
+          {
+            name: 'Joined (guild)',
+            value: member?.joinedTimestamp
+              ? `<t:${Math.floor(member.joinedTimestamp / 1000)}:R>`
+              : 'Not in server / Unknown',
+            inline: true
+          },
+          { name: 'Warns (DB)', value: `${history.warns.length}`, inline: true },
+          { name: 'Last known tag (DB)', value: profile?.last_known_tag || 'Unknown', inline: true },
+          {
+            name: 'Last seen (DB)',
+            value: profile?.last_seen
+              ? `<t:${Math.floor(new Date(profile.last_seen).getTime() / 1000)}:R>`
+              : 'Unknown',
+            inline: true
+          },
+          { name: 'Recent actions (DB)', value: actionsText }
+        );
+
+      return interaction.reply({ embeds: [embed] });
     }
 
+    /* SAY (owner only) */
     if (cmd === 'say') {
       if (interaction.user.id !== OWNER_ID)
         return interaction.reply({ embeds: [errorEmbed('Owner only')], ephemeral: true });
@@ -380,6 +476,11 @@ client.on('interactionCreate', async interaction => {
         ]
       });
 
+      // DB: uložiť ticket
+      await ticketCreate(interaction.guild.id, interaction.user.id, ch.id, type).catch(e => {
+        console.error('❌ ticketCreate failed:', e);
+      });
+
       startAutoClose(ch);
 
       await ch.send({
@@ -400,8 +501,19 @@ client.on('interactionCreate', async interaction => {
       return interaction.reply({ embeds: [okEmbed(`Ticket created: ${ch}`)], ephemeral: true });
     }
 
+    /* CLOSE TICKET (support/admin only) */
     if (interaction.customId === 'close_ticket') {
+      if (!isAdminOrSupport(interaction.member)) {
+        return interaction.reply({ embeds: [errorEmbed('Support/Admin only')], ephemeral: true });
+      }
+
       await interaction.reply({ embeds: [okEmbed('Closing ticket...')] });
+
+      // DB: close ticket
+      ticketClose(interaction.channel.id, `closed by ${interaction.user.id}`).catch(e => {
+        console.error('❌ ticketClose(manual) failed:', e);
+      });
+
       setTimeout(() => interaction.channel.delete().catch(() => {}), 5000);
     }
   }
@@ -418,7 +530,7 @@ client.on('messageCreate', msg => {
 client.once('ready', async () => {
   console.log('🟢 ready event fired');
 
-  await initDB(); // 🔥 TOTO TAM CHÝBALO
+  await initDB();
 
   console.log(`✅ Logged in as ${client.user.tag}`);
   await deployCommands();
